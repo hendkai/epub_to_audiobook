@@ -79,7 +79,7 @@ class GeneralConfig:
         self.tts = args.tts
         self.preview = args.preview
         self.language = args.language
-        self.newline_mode = args.newline_mode
+        self.newline_mode = args.newline_mode if args.newline_mode else None
         self.chapter_start = args.chapter_start
         self.chapter_end = args.chapter_end
         self.output_text = args.output_text
@@ -328,6 +328,8 @@ def extract_chapters(
                 cleaned_text = re.sub(r"[\n]+", MAGIC_BREAK_STRING, raw.strip())
             elif newline_mode == "double":
                 cleaned_text = re.sub(r"[\n]{2,}", MAGIC_BREAK_STRING, raw.strip())
+            elif newline_mode is None:
+                cleaned_text = re.sub(r"\n", " ", raw.strip())
             else:
                 raise ValueError(f"Invalid newline mode: {newline_mode}")
 
@@ -558,8 +560,7 @@ def main():
     parser.add_argument(
         "--newline_mode",
         choices=["single", "double", "none"],
-        default="double",
-        help="Choose the mode of detecting new paragraphs: 'single', 'double', or 'none'. 'single' means a single newline character, while 'double' means two consecutive newline characters. 'none' means all newline characters will be replace with blank so paragraphs will not be detected. (default: double, works for most ebooks but will detect less paragraphs for some ebooks)",
+        help="Choose the mode of detecting new paragraphs: 'single', 'double', or 'none'. 'single' means a single newline character, while 'double' means two consecutive newline characters. 'none' means all newline characters will be replace with blank so paragraphs will not be detected.",
     )
     parser.add_argument(
         "--title_mode",
