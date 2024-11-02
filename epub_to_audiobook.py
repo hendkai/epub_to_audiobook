@@ -19,6 +19,8 @@ from openai import OpenAI
 from tqdm import tqdm
 import time
 import configparser
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
 
 logging.basicConfig(
     level=logging.INFO,
@@ -308,7 +310,7 @@ def extract_chapters(
     for item in epub_book.get_items():
         if item.get_type() == ebooklib.ITEM_DOCUMENT:
             content = item.get_content()
-            soup = BeautifulSoup(content, "lxml")
+            soup = BeautifulSoup(content, "xml")
             title = soup.title.string if soup.title else ""
             raw = soup.get_text(strip=False)
             logger.debug(f"Raw text: <{raw[:100]}>")
