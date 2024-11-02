@@ -189,6 +189,12 @@ class EpubToAudiobookGUI:
             self.output_folder_entry.delete(0, tk.END)
             self.output_folder_entry.insert(0, folder_path)
 
+    def filter_options(self, options):
+        return {k: v for k, v in options.items() if v}
+
+    def filter_empty_options(self, options):
+        return {k: v for k, v in options.items() if v not in [None, "", False]}
+
     def start_conversion(self):
         input_file = self.input_file_entry.get()
         output_folder = self.output_folder_entry.get()
@@ -223,34 +229,69 @@ class EpubToAudiobookGUI:
             messagebox.showerror("Error", "Please select input file, output folder, and enter API token.")
             return
 
+        if newline_mode not in ["single", "double", "none"]:
+            messagebox.showerror("Error", "Invalid newline mode. Please select 'single', 'double', or 'none'.")
+            return
+
         self.progress["value"] = 0
         self.start_button.config(state=tk.DISABLED)
 
-        self.conversion_thread = threading.Thread(target=self.run_conversion, args=(input_file, output_folder, api_token, tts_provider, one_file, model_name, voice_name, output_format, log_level, preview, language, newline_mode, title_mode, chapter_start, chapter_end, output_text, remove_endnotes, search_and_replace_file, voice_rate, voice_volume, voice_pitch, proxy, break_duration, piper_path, piper_speaker, piper_sentence_silence, piper_length_scale))
+        options = {
+            'input_file': input_file,
+            'output_folder': output_folder,
+            'tts_provider': tts_provider,
+            'one_file': one_file,
+            'model_name': model_name,
+            'voice_name': voice_name,
+            'output_format': output_format,
+            'log_level': log_level,
+            'preview': preview,
+            'language': language,
+            'newline_mode': newline_mode,
+            'title_mode': title_mode,
+            'chapter_start': chapter_start,
+            'chapter_end': chapter_end,
+            'output_text': output_text,
+            'remove_endnotes': remove_endnotes,
+            'search_and_replace_file': search_and_replace_file,
+            'voice_rate': voice_rate,
+            'voice_volume': voice_volume,
+            'voice_pitch': voice_pitch,
+            'proxy': proxy,
+            'break_duration': break_duration,
+            'piper_path': piper_path,
+            'piper_speaker': piper_speaker,
+            'piper_sentence_silence': piper_sentence_silence,
+            'piper_length_scale': piper_length_scale
+        }
+
+        filtered_options = self.filter_empty_options(options)
+
+        self.conversion_thread = threading.Thread(target=self.run_conversion, args=(filtered_options, api_token))
         self.conversion_thread.start()
 
-    def run_conversion(self, input_file, output_folder, api_token, tts_provider, one_file, model_name, voice_name, output_format, log_level, preview, language, newline_mode, title_mode, chapter_start, chapter_end, output_text, remove_endnotes, search_and_replace_file, voice_rate, voice_volume, voice_pitch, proxy, break_duration, piper_path, piper_speaker, piper_sentence_silence, piper_length_scale):
+    def run_conversion(self, options, api_token):
         try:
-            Args = namedtuple('Args', ['input_file', 'output_folder', 'tts', 'preview', 'language', 'newline_mode', 'chapter_start', 'chapter_end', 'output_text', 'remove_endnotes', 'one_file', 'log', 'title_mode', 'search_and_replace_file', 'voice_rate', 'voice_volume', 'voice_pitch', 'proxy', 'break_duration', 'piper_path', 'piper_speaker', 'piper_sentence_silence', 'piper_length_scale'])
-            args = Args(input_file, output_folder, tts_provider, preview, language, newline_mode, chapter_start, chapter_end, output_text, remove_endnotes, one_file, log_level, title_mode, search_and_replace_file, voice_rate, voice_volume, voice_pitch, proxy, break_duration, piper_path, piper_speaker, piper_sentence_silence, piper_length_scale)
+            Args = namedtuple('Args', options.keys())
+            args = Args(**options)
 
             os.environ["API_TOKEN"] = api_token
 
             general_config = GeneralConfig(args)
 
-            if tts_provider == TTS_AZURE:
+            if args.tts_provider == TTS_AZURE:
                 tts_provider_instance = AzureTTSProvider(
                     general_config,
-                    voice_name,
-                    break_duration,
-                    output_format,
+                    args.voice_name,
+                    args.break_duration,
+                    args.output_format,
                 )
-            elif tts_provider == TTS_OPENAI:
+            elif args.tts_provider == TTS_OPENAI:
                 tts_provider_instance = OpenAITTSProvider(
-                    general_config, model_name, voice_name, output_format
+                    general_config, args.model_name, args.voice_name, args.output_format
                 )
             else:
-                raise ValueError(f"Invalid TTS provider: {tts_provider}")
+                raise ValueError(f"Invalid TTS provider: {args.tts_provider}")
 
             epub_to_audiobook(tts_provider_instance)
             messagebox.showinfo("Success", "Conversion completed successfully!")

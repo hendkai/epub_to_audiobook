@@ -86,6 +86,14 @@ class GeneralConfig:
         self.remove_endnotes = args.remove_endnotes
         self.one_file = args.one_file
 
+        # Filter out options without user input
+        self.filter_options()
+
+    def filter_options(self):
+        for attr, value in self.__dict__.items():
+            if value is None or value == "":
+                setattr(self, attr, None)
+
     def __str__(self):
         return f"input_file={self.input_file}, output_folder={self.output_folder}, tts={self.tts}, preview={self.preview}, newline_mode={self.newline_mode}, chapter_start={self.chapter_start}, chapter_end={self.chapter_end}, output_text={self.output_text}, remove_endnotes={self.remove_endnotes}, one_file={self.one_file}"
 
