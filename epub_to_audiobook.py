@@ -82,9 +82,10 @@ class GeneralConfig:
         self.chapter_end = args.chapter_end
         self.output_text = args.output_text
         self.remove_endnotes = args.remove_endnotes
+        self.one_file = args.one_file
 
     def __str__(self):
-        return f"input_file={self.input_file}, output_folder={self.output_folder}, tts={self.tts}, preview={self.preview}, newline_mode={self.newline_mode}, chapter_start={self.chapter_start}, chapter_end={self.chapter_end}, output_text={self.output_text}, remove_endnotes={self.remove_endnotes}"
+        return f"input_file={self.input_file}, output_folder={self.output_folder}, tts={self.tts}, preview={self.preview}, newline_mode={self.newline_mode}, chapter_start={self.chapter_start}, chapter_end={self.chapter_end}, output_text={self.output_text}, remove_endnotes={self.remove_endnotes}, one_file={self.one_file}"
 
 
 class TTSProvider:
@@ -310,7 +311,7 @@ def extract_chapters(
             soup = BeautifulSoup(content, "lxml")
             title = soup.title.string if soup.title else ""
             raw = soup.get_text(strip=False)
-            logger.debug(f"Raw text: <{raw[:]}>")
+            logger.debug(f"Raw text: <{raw[:100]}>")
 
             # Replace excessive whitespaces and newline characters based on the mode
             if newline_mode == "single":
@@ -320,7 +321,7 @@ def extract_chapters(
             else:
                 raise ValueError(f"Invalid newline mode: {newline_mode}")
 
-            logger.debug(f"Cleaned text step 1: <{cleaned_text[:]}>")
+            logger.debug(f"Cleaned text step 1: <{cleaned_text[:100]}>")
             cleaned_text = re.sub(r"\s+", " ", cleaned_text)
             logger.info(f"Cleaned text step 2: <{cleaned_text[:100]}>")
 
@@ -396,7 +397,7 @@ def set_audio_tags(output_file, audio_tags):
     try:
         try:
             tags = ID3(output_file)
-            print(tags)
+            logger.debug(tags)
         except ID3NoHeaderError:
             logger.debug(f"handling ID3NoHeaderError: {output_file}")
             tags = ID3()
@@ -421,6 +422,7 @@ def epub_to_audiobook(tts_provider: TTSProvider):
     chapter_end = conf.chapter_end
     remove_endnotes = conf.remove_endnotes
     output_text = conf.output_text
+    one_file = conf.one_file
 
     book = epub.read_epub(input_file)
     chapters = extract_chapters(book, newline_mode, remove_endnotes)
@@ -460,41 +462,58 @@ def epub_to_audiobook(tts_provider: TTSProvider):
 
     start_time = time.time()  # Startzeit messen
 
-    # Loop durch jeden Chapter und Konvertierung zu Sprache unter Verwendung des bereitgestellten TTS-Providers
-    for idx, (title, text) in enumerate(chapters, start=1):
-        if idx < chapter_start:
-            continue
-        if idx > chapter_end:
-            break
-
-        # Display progress bar
-        with tqdm(total=len(chapters), desc=f"Converting chapter {idx}/{len(chapters)}") as pbar:
-            logger.info(f"Converting chapter {idx}/{len(chapters)}: {title}, characters: {len(text)}")
-
-            total_characters += len(text)
-
-            if output_text:
-                text_file = os.path.join(output_folder, f"{idx:04d}_{title}.txt")
-                with open(text_file, "w") as file:
-                    file.write(text)
-
-            if preview:
-                pbar.update(1)
+    if one_file:
+        combined_text = ""
+        for idx, (title, text) in enumerate(chapters, start=1):
+            if idx < chapter_start:
                 continue
+            if idx > chapter_end:
+                break
+            combined_text += text + " "
 
-            # Define audio_suffix here or pass it as an argument when calling the function
-            audio_suffix = ".mp3"  # Change this to the appropriate audio file extension
+        audio_tags = AudioTags(book_title, author, book_title, 1)
+        output_file = os.path.join(output_folder, f"{book_title}.mp3")
+        tts_provider.text_to_speech(
+            combined_text,
+            output_file,
+            audio_tags,
+        )
+    else:
+        # Loop durch jeden Chapter und Konvertierung zu Sprache unter Verwendung des bereitgestellten TTS-Providers
+        for idx, (title, text) in enumerate(chapters, start=1):
+            if idx < chapter_start:
+                continue
+            if idx > chapter_end:
+                break
 
-            output_file = os.path.join(output_folder, f"{idx:04d}_{title}{audio_suffix}")
+            # Display progress bar
+            with tqdm(total=len(chapters), desc=f"Converting chapter {idx}/{len(chapters)}") as pbar:
+                logger.info(f"Converting chapter {idx}/{len(chapters)}: {title}, characters: {len(text)}")
 
-            audio_tags = AudioTags(title, author, book_title, idx)
-            tts_provider.text_to_speech(
-                text,
-                output_file,
-                audio_tags,
-            )
+                total_characters += len(text)
 
-            pbar.update(1)
+                if output_text:
+                    text_file = os.path.join(output_folder, f"{idx:04d}_{title}.txt")
+                    with open(text_file, "w") as file:
+                        file.write(text)
+
+                if preview:
+                    pbar.update(1)
+                    continue
+
+                # Define audio_suffix here or pass it as an argument when calling the function
+                audio_suffix = ".mp3"  # Change this to the appropriate audio file extension
+
+                output_file = os.path.join(output_folder, f"{idx:04d}_{title}{audio_suffix}")
+
+                audio_tags = AudioTags(title, author, book_title, idx)
+                tts_provider.text_to_speech(
+                    text,
+                    output_file,
+                    audio_tags,
+                )
+
+                pbar.update(1)
 
     elapsed_time = time.time() - start_time  # Gesamtzeit berechnen
 
@@ -528,9 +547,15 @@ def main():
     )
     parser.add_argument(
         "--newline_mode",
-        choices=["single", "double"],
+        choices=["single", "double", "none"],
         default="double",
-        help="Choose the mode of detecting new paragraphs: 'single' or 'double'. 'single' means a single newline character, while 'double' means two consecutive newline characters. (default: double, works for most ebooks but will detect less paragraphs for some ebooks)",
+        help="Choose the mode of detecting new paragraphs: 'single', 'double', or 'none'. 'single' means a single newline character, while 'double' means two consecutive newline characters. 'none' means all newline characters will be replace with blank so paragraphs will not be detected. (default: double, works for most ebooks but will detect less paragraphs for some ebooks)",
+    )
+    parser.add_argument(
+        "--title_mode",
+        choices=["auto", "tag_text", "first_few"],
+        default="auto",
+        help="Choose the parse mode for chapter title, 'tag_text' search 'title','h1','h2','h3' tag for title, 'first_few' set first 60 characters as title, 'auto' auto apply the best mode for current chapter.",
     )
     parser.add_argument(
         "--chapter_start",
@@ -554,41 +579,57 @@ def main():
         action="store_true",
         help="This will remove endnote numbers from the end or middle of sentences. This is useful for academic books.",
     )
-
-    # Azure specific arguments
-    azure_group = parser.add_argument_group("Azure TTS Options")
-    azure_group.add_argument(
+    parser.add_argument(
+        "--search_and_replace_file",
+        help="Path to a file that contains 1 regex replace per line, to help with fixing pronunciations, etc. The format is: <search>==<replace> Note that you may have to specify word boundaries, to avoid replacing parts of words.",
+    )
+    parser.add_argument(
         "--voice_name",
-        default="en-US-GuyNeural",
-        help="Voice name for the text-to-speech service (default: en-US-GuyNeural). You can use zh-CN-YunyeNeural for Chinese ebooks.",
+        help="Various TTS providers has different voice names, look up for your provider settings.",
     )
-    azure_group.add_argument(
-        "--break_duration",
-        default="1250",
-        help="Break duration in milliseconds for the different paragraphs or sections (default: 1250). Valid values range from 0 to 5000 milliseconds.",
-    )
-    azure_group.add_argument(
+    parser.add_argument(
         "--output_format",
-        default="audio-24khz-48kbitrate-mono-mp3",
-        help="Output format for the text-to-speech service (default: audio-24khz-48kbitrate-mono-mp3). Support formats: audio-16khz-32kbitrate-mono-mp3 audio-16khz-64kbitrate-mono-mp3 audio-16khz-128kbitrate-mono-mp3 audio-24khz-48kbitrate-mono-mp3 audio-24khz-96kbitrate-mono-mp3 audio-24khz-160kbitrate-mono-mp3 audio-48khz-96kbitrate-mono-mp3 audio-48khz-192kbitrate-mono-mp3. See https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech?tabs=streaming#audio-outputs. Only mp3 is supported for now. Different formats will result in different audio quality and file size.",
+        help="Output format for the text-to-speech service. Supported format depends on selected TTS provider",
     )
-
-    # OpenAI specific arguments
-    openai_group = parser.add_argument_group("OpenAI TTS Options")
-    openai_group.add_argument(
-        "--openai_model",
-        default="tts-1",
-        help="Available OpenAI model options: tts-1 and tts-1-hd. Check https://platform.openai.com/docs/guides/text-to-speech/audio-quality.",
+    parser.add_argument(
+        "--model_name",
+        help="Various TTS providers has different neural model names",
     )
-    openai_group.add_argument(
-        "--openai_voice",
-        default="alloy",
-        help="Available OpenAI voice options: alloy, echo, fable, onyx, nova, and shimmer. Check https://platform.openai.com/docs/guides/text-to-speech/voice-options.",
+    parser.add_argument(
+        "--voice_rate",
+        help="Speaking rate of the text. Valid relative values range from -50%(--xxx='-50%') to +100%. For negative value use format --arg=value,",
     )
-    openai_group.add_argument(
-        "--openai_format",
-        default="mp3",
-        help="Available OpenAI output options: mp3, opus, aac, and flac. Check https://platform.openai.com/docs/guides/text-to-speech/supported-output-formats.",
+    parser.add_argument(
+        "--voice_volume",
+        help="Volume level of the speaking voice. Valid relative values floor to -100%. For negative value use format --arg=value,",
+    )
+    parser.add_argument(
+        "--voice_pitch",
+        help="Baseline pitch for the text.Valid relative values like -80Hz,+50Hz, pitch changes should be within 0.5 to 1.5 times the original audio. For negative value use format --arg=value,",
+    )
+    parser.add_argument(
+        "--proxy",
+        help="Proxy server for the TTS provider. Format: http://[username:password@]proxy.server:port",
+    )
+    parser.add_argument(
+        "--break_duration",
+        help="Break duration in milliseconds for the different paragraphs or sections (default: 1250, means 1.25 s). Valid values range from 0 to 5000 milliseconds for Azure TTS.",
+    )
+    parser.add_argument(
+        "--piper_path",
+        help="Path to the Piper TTS executable",
+    )
+    parser.add_argument(
+        "--piper_speaker",
+        help="Piper speaker id, used for multi-speaker models",
+    )
+    parser.add_argument(
+        "--piper_sentence_silence",
+        help="Seconds of silence after each sentence",
+    )
+    parser.add_argument(
+        "--piper_length_scale",
+        help="Phoneme length, a.k.a. speaking rate",
     )
 
     args = parser.parse_args()

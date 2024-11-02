@@ -81,7 +81,7 @@ usage: epub_to_audiobook.py [-h] [--tts {azure,openai}] [--log LOG]
                             [--newline_mode {single,double}]
                             [--chapter_start CHAPTER_START]
                             [--chapter_end CHAPTER_END] [--output_text]
-                            [--remove_endnotes] [--voice_name VOICE_NAME]
+                            [--remove_endnotes] [--one_file] [--voice_name VOICE_NAME]
                             [--break_duration BREAK_DURATION]
                             [--output_format OUTPUT_FORMAT]
                             [--openai_model OPENAI_MODEL]
@@ -136,6 +136,7 @@ options:
   --remove_endnotes     This will remove endnote numbers from the end or
                         middle of sentences. This is useful for academic
                         books.
+  --one_file            Create one big audio file instead of separate files for each chapter.
 
 Azure TTS Options:
   --voice_name VOICE_NAME
@@ -311,6 +312,26 @@ Here are some examples that demonstrate various option combinations:
    ```sh
    python3 epub_to_audiobook.py "path/to/book.epub" "path/to/output/folder" --tts openai --preview --output_text
    ```
+
+## Using the GUI
+
+A graphical user interface (GUI) is also available for users who prefer a more user-friendly way to convert EPUB files to audiobooks. The GUI is built using `tkinter` and provides an easy-to-use interface for selecting the input EPUB file, output folder, TTS provider, and other options.
+
+### Running the GUI
+
+To run the GUI, execute the following command:
+
+```bash
+python3 gui.py
+```
+
+### Using the GUI
+
+1. **Select the EPUB file**: Click the "Browse" button next to the "EPUB File" field and select the EPUB file you want to convert.
+2. **Select the output folder**: Click the "Browse" button next to the "Output Folder" field and select the folder where you want to save the output audio files.
+3. **Choose the TTS provider**: Select either "azure" or "openai" from the "TTS Provider" dropdown menu.
+4. **Choose the option to create one big audio file**: Check the "Create one big audio file" checkbox if you want to create a single audio file for the entire book.
+5. **Start the conversion**: Click the "Start Conversion" button to begin the conversion process. A progress bar will display the progress of the conversion.
 
 ## Troubleshooting
 
