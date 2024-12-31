@@ -1,3 +1,4 @@
+import sys
 import os
 import re
 import io
@@ -21,6 +22,7 @@ import time
 import configparser
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+from pydub import AudioSegment
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,14 +79,26 @@ class GeneralConfig:
         self.input_file = args.input_file
         self.output_folder = args.output_folder
         self.tts = args.tts
-        self.preview = args.preview
-        self.language = args.language
-        self.newline_mode = args.newline_mode if args.newline_mode else None
-        self.chapter_start = args.chapter_start
-        self.chapter_end = args.chapter_end
-        self.output_text = args.output_text
-        self.remove_endnotes = args.remove_endnotes
-        self.one_file = args.one_file
+        self.preview = getattr(args, 'preview', False)
+        self.newline_mode = getattr(args, 'newline_mode', 'double')
+        self.chapter_start = getattr(args, 'chapter_start', 1)
+        self.chapter_end = getattr(args, 'chapter_end', -1)
+        self.remove_endnotes = getattr(args, 'remove_endnotes', False)
+        self.output_text = getattr(args, 'output_text', False)
+        self.one_file = getattr(args, 'one_file', False)
+        self.language = getattr(args, 'language', None)
+        self.output_format = getattr(args, 'output_format', 'mp3')
+        self.voice_name = getattr(args, 'voice_name', None)
+        self.model_name = getattr(args, 'model_name', None)
+        self.break_duration = getattr(args, 'break_duration', None)
+        
+        # Logging setup
+        log_level = getattr(args, 'log', 'INFO')
+        numeric_level = getattr(logging, log_level.upper(), logging.INFO)
+        logging.basicConfig(
+            level=numeric_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
 
         # Filter out options without user input
         self.filter_options()
@@ -323,31 +337,40 @@ def extract_chapters(
             raw = soup.get_text(strip=False)
             logger.debug(f"Raw text: <{raw[:100]}>")
 
-            # Replace excessive whitespaces and newline characters based on the mode
+            # Erste Bereinigung: Entferne übermäßige Leerzeichen und Zeilenumbrüche
+            cleaned_text = raw.strip()
+            
+            # Ersetze Zeilenumbrüche basierend auf dem Modus
             if newline_mode == "single":
-                cleaned_text = re.sub(r"[\n]+", MAGIC_BREAK_STRING, raw.strip())
+                cleaned_text = re.sub(r"[\n]+", " " + MAGIC_BREAK_STRING + " ", cleaned_text)
             elif newline_mode == "double":
-                cleaned_text = re.sub(r"[\n]{2,}", MAGIC_BREAK_STRING, raw.strip())
+                cleaned_text = re.sub(r"[\n]{2,}", " " + MAGIC_BREAK_STRING + " ", cleaned_text)
             elif newline_mode is None:
-                cleaned_text = re.sub(r"\n", " ", raw.strip())
+                cleaned_text = re.sub(r"\n", " ", cleaned_text)
             else:
                 raise ValueError(f"Invalid newline mode: {newline_mode}")
 
-            logger.debug(f"Cleaned text step 1: <{cleaned_text[:100]}>")
+            # Normalisiere Leerzeichen
             cleaned_text = re.sub(r"\s+", " ", cleaned_text)
-            logger.info(f"Cleaned text step 2: <{cleaned_text[:100]}>")
+            
+            # Stelle sicher, dass vor und nach MAGIC_BREAK_STRING Leerzeichen sind
+            cleaned_text = cleaned_text.replace(MAGIC_BREAK_STRING, " " + MAGIC_BREAK_STRING + " ")
+            cleaned_text = re.sub(r"\s+", " ", cleaned_text)  # Entferne doppelte Leerzeichen
+            
+            # Entferne Leerzeichen vor Satzzeichen
+            cleaned_text = re.sub(r'\s+([.,!?])', r'\1', cleaned_text)
 
-            # Removes endnote numbers
-            if remove_endnotes == True:
-                cleaned_text = re.sub(r'(?<=[a-zA-Z.,!?;”")])\d+', "", cleaned_text)
-                logger.info(f"Cleaned text step 4: <{cleaned_text[:100]}>")
+            # Removes endnote numbers wenn aktiviert
+            if remove_endnotes:
+                cleaned_text = re.sub(r'(?<=[a-zA-Z.,!?;"])\d+', "", cleaned_text)
 
-            # fill in the title if it's missing
+            logger.debug(f"Cleaned text: <{cleaned_text[:100]}>")
+
+            # Titel verarbeiten
             if not title:
                 title = cleaned_text[:60]
-            logger.debug(f"Raw title: <{title}>")
             title = sanitize_title(title)
-            logger.info(f"Sanitized title: <{title}>")
+            logger.debug(f"Sanitized title: <{title}>")
 
             chapters.append((title, cleaned_text))
             soup.decompose()
@@ -423,6 +446,40 @@ def set_audio_tags(output_file, audio_tags):
         raise e  # TODO: use this raise to catch unknown errors for now
 
 
+def process_chapter(chapter: Tuple[str, str], tts_provider: TTSProvider, output_folder: str, book_title: str, author: str, idx: int) -> AudioSegment:
+    """
+    Verarbeitet ein einzelnes Kapitel und konvertiert es in Audio.
+    
+    Args:
+        chapter: Tuple aus (Titel, Text) des Kapitels
+        tts_provider: Der TTS-Provider für die Audiokonvertierung
+        output_folder: Ausgabeordner für die Audiodateien
+        book_title: Titel des Buches
+        author: Autor des Buches
+        idx: Index des Kapitels
+    
+    Returns:
+        AudioSegment: Das verarbeitete Audiokapitel
+    """
+    title, text = chapter
+    
+    # Erstelle die Ausgabedatei
+    output_file = os.path.join(output_folder, f"chapter_{idx:03d}_{title}.mp3")
+    
+    # Erstelle die Audio-Tags
+    audio_tags = AudioTags(
+        title=title,
+        author=author,
+        book_title=book_title,
+        idx=idx
+    )
+    
+    # Konvertiere Text zu Sprache
+    tts_provider.text_to_speech(text, output_file, audio_tags)
+    
+    # Lade die erstellte Audiodatei
+    return AudioSegment.from_mp3(output_file)
+
 def epub_to_audiobook(tts_provider: TTSProvider):
     # assign config values
     conf = tts_provider.general_config
@@ -474,63 +531,100 @@ def epub_to_audiobook(tts_provider: TTSProvider):
 
     start_time = time.time()  # Startzeit messen
 
+    # Überprüfen Sie die one_file Option
     if one_file:
-        combined_text = ""
-        for idx, (title, text) in enumerate(chapters, start=1):
-            if idx < chapter_start:
-                continue
-            if idx > chapter_end:
-                break
-            combined_text += text + " "
-
-        audio_tags = AudioTags(book_title, author, book_title, 1)
-        output_file = os.path.join(output_folder, f"{book_title}.mp3")
-        tts_provider.text_to_speech(
-            combined_text,
-            output_file,
-            audio_tags,
-        )
+        # Logik für einzelne Ausgabedatei
+        combined_audio = AudioSegment.empty()
+        for idx, chapter in enumerate(chapters[chapter_start-1:chapter_end], start=chapter_start):
+            # Verarbeite jeden Chapter
+            audio = process_chapter(chapter, tts_provider, output_folder, book_title, author, idx)
+            combined_audio += audio
+            total_characters += len(chapter[1])
+            
+        # Speichere die kombinierte Audiodatei
+        output_file = os.path.join(output_folder, f"{book_title}_complete.mp3")
+        combined_audio.export(output_file, format="mp3")
     else:
-        # Loop durch jeden Chapter und Konvertierung zu Sprache unter Verwendung des bereitgestellten TTS-Providers
-        for idx, (title, text) in enumerate(chapters, start=1):
-            if idx < chapter_start:
-                continue
-            if idx > chapter_end:
-                break
-
-            # Display progress bar
-            with tqdm(total=len(chapters), desc=f"Converting chapter {idx}/{len(chapters)}") as pbar:
-                logger.info(f"Converting chapter {idx}/{len(chapters)}: {title}, characters: {len(text)}")
-
-                total_characters += len(text)
-
-                if output_text:
-                    text_file = os.path.join(output_folder, f"{idx:04d}_{title}.txt")
-                    with open(text_file, "w") as file:
-                        file.write(text)
-
-                if preview:
-                    pbar.update(1)
-                    continue
-
-                # Define audio_suffix here or pass it as an argument when calling the function
-                audio_suffix = ".mp3"  # Change this to the appropriate audio file extension
-
-                output_file = os.path.join(output_folder, f"{idx:04d}_{title}{audio_suffix}")
-
-                audio_tags = AudioTags(title, author, book_title, idx)
-                tts_provider.text_to_speech(
-                    text,
-                    output_file,
-                    audio_tags,
-                )
-
-                pbar.update(1)
+        # Bestehende Logik für mehrere Dateien
+        for idx, chapter in enumerate(chapters[chapter_start-1:chapter_end], start=chapter_start):
+            audio = process_chapter(chapter, tts_provider, output_folder, book_title, author, idx)
+            total_characters += len(chapter[1])
 
     elapsed_time = time.time() - start_time  # Gesamtzeit berechnen
 
     logger.info(f"✨ Total characters in selected chapters: {total_characters} ✨")
     logger.info(f"⌛ Elapsed Time: {elapsed_time:.2f} seconds ⌛")
+
+    # Überprüfen Sie das Ausgabeformat
+    if tts_provider.general_config.output_format.lower() != "mp3":
+        raise ValueError("Das Ausgabeformat muss mp3 sein.")
+
+def clean_text(text: str) -> str:
+    """Clean the text by removing unwanted characters and normalizing whitespace."""
+    try:
+        # Entferne HTML-Tags
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Ersetze verschiedene Arten von Anführungszeichen durch einfache
+        text = text.replace('"', '"').replace('"', '"').replace('„', '"')
+        text = text.replace(''', "'").replace(''', "'")
+        
+        # Ersetze mehrfache Leerzeichen durch ein einzelnes
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Entferne Leerzeichen am Anfang und Ende
+        text = text.strip()
+        
+        # Behandle unausgewogene Klammern
+        stack = []
+        cleaned_text = ""
+        
+        for i, char in enumerate(text):
+            if char == '(':
+                stack.append(i)
+                cleaned_text += char
+            elif char == ')':
+                if stack:  # Wenn es eine öffnende Klammer gibt
+                    stack.pop()
+                    cleaned_text += char
+                # Ignoriere schließende Klammer ohne öffnende Klammer
+            else:
+                cleaned_text += char
+                
+        # Füge fehlende schließende Klammern am Ende hinzu
+        cleaned_text += ')' * len(stack)
+        
+        # Behandle MAGIC_BREAK_STRING
+        cleaned_text = cleaned_text.replace(MAGIC_BREAK_STRING.strip(), MAGIC_BREAK_STRING)
+        
+        # Entferne doppelte Breaks
+        cleaned_text = re.sub(f"{MAGIC_BREAK_STRING}+", MAGIC_BREAK_STRING, cleaned_text)
+        
+        logger.debug(f"Cleaned text step 2: <{cleaned_text[:100]}>")  # Ändern zu debug level
+        return cleaned_text
+        
+    except Exception as e:
+        logger.error(f"Error in clean_text: {e}")
+        return text  # Gib den ursprünglichen Text zurück, wenn ein Fehler auftritt
+
+def check_dependencies():
+    """Überprüft die notwendigen Abhängigkeiten"""
+    try:
+        # Überprüfe ffmpeg Installation
+        from shutil import which
+        if which('ffmpeg') is None:
+            logger.warning("ffmpeg ist nicht installiert. Bitte installieren Sie ffmpeg für die Audiobearbeitung.")
+            if sys.platform.startswith('linux'):
+                logger.info("Unter Linux können Sie ffmpeg mit 'sudo apt-get install ffmpeg' installieren")
+            elif sys.platform.startswith('darwin'):
+                logger.info("Unter macOS können Sie ffmpeg mit 'brew install ffmpeg' installieren")
+            elif sys.platform.startswith('win'):
+                logger.info("Unter Windows laden Sie ffmpeg von https://www.ffmpeg.org/download.html herunter")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Fehler beim Überprüfen der Abhängigkeiten: {e}")
+        return False
 
 def main():
     parser = argparse.ArgumentParser(description="Convert EPUB to audiobook")
@@ -645,9 +739,9 @@ def main():
 
     args = parser.parse_args()
 
-    logger.setLevel(args.log)
-
-    general_config = GeneralConfig(args)
+    # Überprüfen Sie, ob die Eingabedatei und der Ausgabepfad angegeben sind
+    if not args.input_file or not args.output_folder:
+        parser.error("Die Eingabedatei und der Ausgabepfad sind erforderlich.")
 
     if args.tts == TTS_AZURE:
         tts_provider = AzureTTSProvider(
@@ -669,4 +763,30 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        # Überprüfe Abhängigkeiten
+        check_dependencies()
+        
+        # Ignoriere bestimmte Warnungen
+        import warnings
+        warnings.filterwarnings("ignore", category=UserWarning, module="ebooklib.epub")
+        warnings.filterwarnings("ignore", category=FutureWarning, module="ebooklib.epub")
+        warnings.filterwarnings("ignore", category=RuntimeWarning, module="pydub.utils")
+        
+        # Überprüfen Sie, ob Kommandozeilenargumente übergeben wurden
+        if len(sys.argv) > 1:
+            main()
+        else:
+            # Wenn keine Argumente übergeben wurden, starten Sie die GUI
+            import tkinter as tk
+            from gui import EpubToAudiobookGUI
+            root = tk.Tk()
+            app = EpubToAudiobookGUI(root)
+            root.mainloop()
+            sys.exit(0)
+    except Exception as e:
+        logger.error(f"Ein Fehler ist aufgetreten: {e}")
+        if len(sys.argv) <= 1:  # Wenn GUI-Modus
+            import tkinter.messagebox as messagebox
+            messagebox.showerror("Error", str(e))
+        sys.exit(1)

@@ -101,6 +101,14 @@ class EpubToAudiobookGUI:
                                            values=["auto", "tag_text", "first_few"])
         self.title_mode_menu.grid(row=3, column=1, padx=5, pady=5)
 
+        # Single File Output Option
+        self.single_file_label = ttk.Label(optional_frame, text="Output Mode:")
+        self.single_file_label.grid(row=4, column=0, padx=5, pady=5, sticky="e")
+        self.single_file_var = tk.StringVar(value="multiple")  # Default: multiple files
+        self.single_file_menu = ttk.Combobox(optional_frame, textvariable=self.single_file_var,
+                                            values=["single", "multiple"])
+        self.single_file_menu.grid(row=4, column=1, padx=5, pady=5)
+
         # Add model name field
         self.model_name_label = ttk.Label(self.root, text="Model Name:")
         self.model_name_label.grid(row=31, column=0, padx=10, pady=10, sticky="e")
@@ -117,6 +125,8 @@ class EpubToAudiobookGUI:
         self.output_format_label = ttk.Label(self.root, text="Output Format:")
         self.output_format_label.grid(row=33, column=0, padx=10, pady=10, sticky="e")
         self.output_format_entry = ttk.Entry(self.root, width=50)
+        self.output_format_entry.insert(0, "mp3")  # Set default to mp3
+        self.output_format_entry.config(state='readonly')  # Make it read-only
         self.output_format_entry.grid(row=33, column=1, padx=10, pady=10)
 
         # ... (weitere optionale Einstellungen) ...
@@ -142,22 +152,6 @@ class EpubToAudiobookGUI:
         self.language_label.grid(row=14, column=0, padx=10, pady=10, sticky="e")
         self.language_entry = ttk.Entry(self.root, width=50)
         self.language_entry.grid(row=14, column=1, padx=10, pady=10)
-
-        # Replace newline mode entry with checkboxes
-        self.newline_mode_label = ttk.Label(self.root, text="Newline Mode:")
-        self.newline_mode_label.grid(row=15, column=0, padx=10, pady=10, sticky="e")
-        
-        self.newline_mode_frame = ttk.Frame(self.root)
-        self.newline_mode_frame.grid(row=15, column=1, padx=10, pady=10, sticky="w")
-        
-        self.newline_mode_var = tk.StringVar(value="double")
-        self.single_newline = ttk.Radiobutton(self.newline_mode_frame, text="Single", variable=self.newline_mode_var, value="single")
-        self.double_newline = ttk.Radiobutton(self.newline_mode_frame, text="Double", variable=self.newline_mode_var, value="double")
-        self.none_newline = ttk.Radiobutton(self.newline_mode_frame, text="None", variable=self.newline_mode_var, value="none")
-        
-        self.single_newline.pack(side=tk.LEFT, padx=5)
-        self.double_newline.pack(side=tk.LEFT, padx=5)
-        self.none_newline.pack(side=tk.LEFT, padx=5)
 
         self.title_mode_label = ttk.Label(self.root, text="Title Mode:")
         self.title_mode_label.grid(row=16, column=0, padx=10, pady=10, sticky="e")
@@ -290,13 +284,16 @@ class EpubToAudiobookGUI:
         options['input_file'] = self.input_file_entry.get()
         options['output_folder'] = self.output_folder_entry.get()
         options['tts'] = self.tts_provider_var.get()
+        options['one_file'] = self.single_file_var.get() == "single"  # Renamed from single_file to one_file
 
         # Optional settings - nur hinzufügen wenn gesetzt
         if self.log_var.get():
             options['log'] = self.log_var.get()
         
-        # Setze preview immer, auch wenn es False ist
+        # Boolean options - immer setzen
         options['preview'] = self.preview_var.get()
+        options['output_text'] = self.output_text_var.get()
+        options['remove_endnotes'] = self.remove_endnotes_var.get()
 
         if self.newline_var.get() and self.newline_var.get() != "none":
             options['newline_mode'] = self.newline_var.get()
@@ -307,7 +304,30 @@ class EpubToAudiobookGUI:
         if self.language_entry.get():
             options['language'] = self.language_entry.get()
 
-        # ... (weitere optionale Einstellungen) ...
+        # Füge chapter_start und chapter_end nur hinzu, wenn sie nicht leer sind
+        chapter_start = self.chapter_start_entry.get()
+        if chapter_start:
+            try:
+                options['chapter_start'] = int(chapter_start)
+            except ValueError:
+                pass
+
+        chapter_end = self.chapter_end_entry.get()
+        if chapter_end:
+            try:
+                options['chapter_end'] = int(chapter_end)
+            except ValueError:
+                pass
+
+        # Weitere optionale Einstellungen
+        if self.voice_name_entry.get():
+            options['voice_name'] = self.voice_name_entry.get()
+        
+        if self.model_name_entry.get():
+            options['model_name'] = self.model_name_entry.get()
+
+        if self.output_format_entry.get():
+            options['output_format'] = self.output_format_entry.get()
 
         # Filtere None und leere Strings
         return {k: v for k, v in options.items() if v not in (None, "")}
@@ -410,134 +430,59 @@ class EpubToAudiobookGUI:
             self.start_button.config(state=tk.NORMAL)
 
     def show_usage(self):
+        """Zeigt Hilfe-Informationen zur Verwendung des Tools an"""
         usage_text = """
-        Usage:
-        main.py [-h] [--tts {azure,openai,edge,piper}]
-               [--log {DEBUG,INFO,WARNING,ERROR,CRITICAL}] [--preview]
-               [--no_prompt] [--language LANGUAGE]
-               [--newline_mode {single,double,none}]
-               [--title_mode {auto,tag_text,first_few}]
-               [--chapter_start CHAPTER_START] [--chapter_end CHA   PTER_END]
-               [--output_text] [--remove_endnotes]
-               [--search_and_replace_file SEARCH_AND_REPLACE_FILE]
-               [--voice_name VOICE_NAME] [--output_format OUTPUT_FORMAT]
-               [--model_name MODEL_NAME] [--voice_rate VOICE_RATE]
-               [--voice_volume VOICE_VOLUME] [--voice_pitch VOICE_PITCH]
-               [--proxy PROXY] [--break_duration BREAK_DURATION]
-               [--piper_path PIPER_PATH] [--piper_speaker PIPER_SPEAKER]
-               [--piper_sentence_silence PIPER_SENTENCE_SILENCE]
-               [--piper_length_scale PIPER_LENGTH_SCALE]
-               input_file output_folder
+        EPUB zu Audiobook Konverter - Anleitung
 
-        Convert text book to audiobook
-
-        positional arguments:
-          input_file            Path to the EPUB file
-          output_folder         Path to the output folder
-
-        options:
-          -h, --help            show this help message and exit
-          --tts {azure,openai,edge,piper}
-                                Choose TTS provider (default: azure). azure: Azure
-                                Cognitive Services, openai: OpenAI TTS API. When using
-                                azure, environment variables MS_TTS_KEY and
-                                MS_TTS_REGION must be set. When using openai,
-                                environment variable OPENAI_API_KEY must be set.
-          --log {DEBUG,INFO,WARNING,ERROR,CRITICAL}
-                                Log level (default: INFO), can be DEBUG, INFO,
-                                WARNING, ERROR, CRITICAL
-          --preview             Enable preview mode. In preview mode, the script will
-                                not convert the text to speech. Instead, it will print
-                                the chapter index, titles, and character counts.
-          --no_prompt           Don't ask the user if they wish to continue after
-                                estimating the cloud cost for TTS. Useful for
-                                scripting.
-          --language LANGUAGE   Language for the text-to-speech service (default: en-
-                                US). For Azure TTS (--tts=azure), check
-                                https://learn.microsoft.com/en-us/azure/ai-
-                                services/speech-service/language-
-                                support?tabs=tts#text-to-speech for supported
-                                languages. For OpenAI TTS (--tts=openai), their API
-                                detects the language automatically. But setting this
-                                will also help on splitting the text into chunks with
-                                different strategies in this tool, especially for
-                                Chinese characters. For Chinese books, use zh-CN, zh-
-                                TW, or zh-HK.
-          --newline_mode {single,double,none}
-                                Choose the mode of detecting new paragraphs: 'single',
-                                'double', or 'none'. 'single' means a single newline
-                                character, while 'double' means two consecutive
-                                newline characters. 'none' means all newline
-                                characters will be replace with blank so paragraphs
-                                will not be detected. (default: double, works for most
-                                ebooks but will detect less paragraphs for some
-                                ebooks)
-          --title_mode {auto,tag_text,first_few}
-                                Choose the parse mode for chapter title, 'tag_text'
-                                search 'title','h1','h2','h3' tag for title,
-                                'first_few' set first 60 characters as title, 'auto'
-                                auto apply the best mode for current chapter.
-          --chapter_start CHAPTER_START
-                                Chapter start index (default: 1, starting from 1)
-          --chapter_end CHAPTER_END
-                                Chapter end index (default: -1, meaning to the last
-                                chapter)
-          --output_text         Enable Output Text. This will export a plain text file
-                                for each chapter specified and write the files to the
-                                output folder specified.
-          --remove_endnotes     This will remove endnote numbers from the end or
-                                middle of sentences. This is useful for academic
-                                books.
-          --search_and_replace_file SEARCH_AND_REPLACE_FILE
-                                Path to a file that contains 1 regex replace per line,
-                                to help with fixing pronunciations, etc. The format
-                                is: <search>==<replace> Note that you may have to
-                                specify word boundaries, to avoid replacing parts of
-                                words.
-          --voice_name VOICE_NAME
-                                Various TTS providers has different voice names, look
-                                up for your provider settings.
-          --output_format OUTPUT_FORMAT
-                                Output format for the text-to-speech service.
-                                Supported format depends on selected TTS provider
-          --model_name MODEL_NAME
-                                Various TTS providers has different neural model names
-
-        edge specific:
-          --voice_rate VOICE_RATE
-                                Speaking rate of the text. Valid relative values range
-                                from -50%(--xxx='-50%') to +100%. For negative value
-                                use format --arg=value,
-          --voice_volume VOICE_VOLUME
-                                Volume level of the speaking voice. Valid relative
-                                values floor to -100%. For negative value use format
-                                --arg=value,
-          --voice_pitch VOICE_PITCH
-                                Baseline pitch for the text.Valid relative values like
-                                -80Hz,+50Hz, pitch changes should be within 0.5 to 1.5
-                                times the original audio. For negative value use
-                                format --arg=value,
-          --proxy PROXY         Proxy server for the TTS provider. Format:
-                                http://[username:password@]proxy.server:port
-
-        azure/edge specific:
-          --break_duration BREAK_DURATION
-                                Break duration in milliseconds for the different
-                                paragraphs or sections (default: 1250, means 1.25 s).
-                                Valid values range from 0 to 5000 milliseconds for
-                                Azure TTS.
-
-        piper specific:
-          --piper_path PIPER_PATH
-                                Path to the Piper TTS executable
-          --piper_speaker PIPER_SPEAKER
-                                Piper speaker id, used for multi-speaker models
-          --piper_sentence_silence PIPER_SENTENCE_SILENCE
-                                Seconds of silence after each sentence
-          --piper_length_scale PIPER_LENGTH_SCALE
-                                Phoneme length, a.k.a. speaking rate
+        Grundlegende Schritte:
+        1. Wählen Sie eine EPUB-Datei aus (Input File)
+        2. Wählen Sie einen Ausgabeordner (Output Folder)
+        3. Wählen Sie einen TTS-Provider (Azure oder OpenAI)
+        
+        Wichtige Einstellungen:
+        - Output Mode: 
+          * single: Erstellt eine einzelne MP3-Datei
+          * multiple: Erstellt separate MP3-Dateien pro Kapitel
+        
+        - Newline Mode:
+          * single: Neue Absätze bei einzelnen Zeilenumbrüchen
+          * double: Neue Absätze bei doppelten Zeilenumbrüchen
+          * none: Keine Absatzerkennung
+        
+        - Preview: Zeigt nur die Kapitel an, ohne sie zu konvertieren
+        - Output Text: Speichert den Text zusätzlich als Textdatei
+        
+        TTS Provider Einstellungen:
+        - Azure: Benötigt MS_TTS_KEY und MS_TTS_REGION
+        - OpenAI: Benötigt OPENAI_API_KEY
+        
+        Hinweis: Stellen Sie sicher, dass ffmpeg installiert ist.
         """
-        messagebox.showinfo("Usage", usage_text)
+        
+        # Erstelle ein neues Fenster für die Hilfe
+        help_window = tk.Toplevel(self.root)
+        help_window.title("Anleitung")
+        help_window.geometry("600x500")
+        
+        # Erstelle ein Text-Widget mit Scrollbar
+        text_frame = ttk.Frame(help_window)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set)
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        scrollbar.config(command=text_widget.yview)
+        
+        # Füge den Hilfetext hinzu
+        text_widget.insert(tk.END, usage_text)
+        text_widget.config(state=tk.DISABLED)  # Mache den Text schreibgeschützt
+        
+        # Füge einen "Schließen" Button hinzu
+        close_button = ttk.Button(help_window, text="Schließen", command=help_window.destroy)
+        close_button.pack(pady=10)
 
     def save_settings(self):
         settings = {
@@ -550,7 +495,7 @@ class EpubToAudiobookGUI:
             "log_level": self.log_var.get(),
             "preview": self.preview_var.get(),
             "language": self.language_entry.get(),
-            "newline_mode": self.newline_mode_var.get(),
+            "newline_mode": self.newline_var.get(),
             "title_mode": self.title_mode_entry.get(),
             "chapter_start": self.chapter_start_entry.get(),
             "chapter_end": self.chapter_end_entry.get(),
@@ -569,6 +514,7 @@ class EpubToAudiobookGUI:
             "azure_key": self.azure_key_entry.get(),
             "azure_region": self.azure_region_entry.get(),
             "openai_key": self.openai_key_entry.get(),
+            "single_file": self.single_file_var.get(),
         }
         with open(self.settings_file, "w") as f:
             json.dump(settings, f)
@@ -586,7 +532,7 @@ class EpubToAudiobookGUI:
                 self.log_var.set(settings.get("log_level", ""))
                 self.preview_var.set(settings.get("preview", False))
                 self.language_entry.insert(0, settings.get("language", ""))
-                self.newline_mode_var.set(settings.get("newline_mode", "double"))
+                self.newline_var.set(settings.get("newline_mode", "double"))
                 self.title_mode_entry.insert(0, settings.get("title_mode", ""))
                 self.chapter_start_entry.insert(0, settings.get("chapter_start", ""))
                 self.chapter_end_entry.insert(0, settings.get("chapter_end", ""))
@@ -605,6 +551,7 @@ class EpubToAudiobookGUI:
                 self.azure_key_entry.insert(0, settings.get("azure_key", ""))
                 self.azure_region_entry.insert(0, settings.get("azure_region", ""))
                 self.openai_key_entry.insert(0, settings.get("openai_key", ""))
+                self.single_file_var.set(settings.get("single_file", "multiple"))
 
     def load_gui_settings(self):
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -616,7 +563,13 @@ class EpubToAudiobookGUI:
     def start_conversion(self):
         self.start_button.config(state=tk.DISABLED)
         options = self.get_options()
-        
+
+        # Überprüfen Sie, ob die erforderlichen Felder ausgefüllt sind
+        if not options.get('input_file') or not options.get('output_folder'):
+            messagebox.showerror("Fehler", "Bitte geben Sie sowohl die Eingabedatei als auch den Ausgabepfad an.")
+            self.start_button.config(state=tk.NORMAL)
+            return
+
         # Starte die Konversion in einem separaten Thread
         self.conversion_thread = threading.Thread(target=self.run_conversion, args=(options,))
         self.conversion_thread.start()
