@@ -75,7 +75,28 @@ class AudioTags:
     idx: int  # for TRCK
 
 
+@dataclasses.dataclass
 class GeneralConfig:
+    input_file: str
+    output_folder: str
+    tts: str
+    language: str = "de-DE"
+    voice_name: str = None
+    preview: bool = False
+    output_format: str = "mp3"
+    log: str = "INFO"
+    newline_mode: str = "double"
+    title_mode: str = "auto"
+    output_text: bool = False
+    remove_endnotes: bool = False
+    chapter_start: int = 1
+    chapter_end: int = -1
+    one_file: bool = False
+    break_duration: int = None
+    text_mode: bool = False
+    custom_filename: str = None
+    model_name: str = None
+
     def __init__(self, args):
         self.input_file = args.input_file
         self.output_folder = args.output_folder
@@ -87,29 +108,37 @@ class GeneralConfig:
         self.remove_endnotes = getattr(args, 'remove_endnotes', False)
         self.output_text = getattr(args, 'output_text', False)
         self.one_file = getattr(args, 'one_file', False)
-        self.language = getattr(args, 'language', None)
+        self.language = getattr(args, 'language', "de-DE")
         self.output_format = getattr(args, 'output_format', 'mp3')
         self.voice_name = getattr(args, 'voice_name', None)
         self.model_name = getattr(args, 'model_name', None)
         self.break_duration = getattr(args, 'break_duration', None)
         self.text_mode = getattr(args, 'text_mode', False)
+        self.custom_filename = getattr(args, 'custom_filename', None)
+        self.title_mode = getattr(args, 'title_mode', 'auto')
         
         # Logging setup
         log_level = getattr(args, 'log', 'INFO')
+        self.log = log_level
         numeric_level = getattr(logging, log_level.upper(), logging.INFO)
+        
         logging.basicConfig(
-            level=numeric_level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            level=numeric_level, 
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler("epub_to_audiobook.log"),
+                logging.StreamHandler()
+            ]
         )
-
+        
         # Filter out options without user input
         self.filter_options()
-
+    
     def filter_options(self):
         for attr, value in self.__dict__.items():
             if value is None or value == "":
                 setattr(self, attr, None)
-
+    
     def __str__(self):
         return f"input_file={self.input_file}, output_folder={self.output_folder}, tts={self.tts}, preview={self.preview}, newline_mode={self.newline_mode}, chapter_start={self.chapter_start}, chapter_end={self.chapter_end}, output_text={self.output_text}, remove_endnotes={self.remove_endnotes}, one_file={self.one_file}"
 
@@ -542,6 +571,7 @@ def epub_to_audiobook(tts_provider: TTSProvider):
     remove_endnotes = tts_provider.general_config.remove_endnotes
     one_file = tts_provider.general_config.one_file
     text_mode = getattr(tts_provider.general_config, 'text_mode', False)
+    custom_filename = getattr(tts_provider.general_config, 'custom_filename', None)
 
     logger.info(f"Converting {input_file} to audiobook with config: {tts_provider}")
 
@@ -662,8 +692,19 @@ def epub_to_audiobook(tts_provider: TTSProvider):
             for file in chapter_files:
                 f.write(f"file '{file}'\n")
         
+        # Bestimme den Dateinamen für das kombinierte Audiobook
+        if custom_filename:
+            output_filename = f"{custom_filename}.{tts_provider.general_config.output_format}"
+        else:
+            # Sanitized book title und author für Dateinamen
+            safe_book_title = sanitize_title(book_title)
+            safe_author = sanitize_title(author)
+            output_filename = f"{safe_book_title}_by_{safe_author}.{tts_provider.general_config.output_format}"
+        
+        # Vollständiger Pfad für die Ausgabedatei
+        output_file = os.path.join(output_folder, output_filename)
+        
         # Combine files using ffmpeg with high quality settings
-        output_file = os.path.join(output_folder, f"complete_audiobook.{tts_provider.general_config.output_format}")
         cmd = [
             'ffmpeg', '-y',
             '-f', 'concat',

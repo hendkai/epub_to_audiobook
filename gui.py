@@ -13,6 +13,10 @@ from ebooklib import epub
 from bs4 import BeautifulSoup
 import logging
 import time
+import requests
+import csv
+import gzip
+from io import BytesIO, StringIO
 
 # Übersetzungen
 translations = {
@@ -190,6 +194,7 @@ class GutenbergBookSearchDialog:
         search_entry.insert(0, t['search_placeholder'])
         search_entry.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
         search_entry.bind("<FocusIn>", lambda e: search_entry.delete(0, tk.END) if search_entry.get() == t['search_placeholder'] else None)
+        search_entry.bind("<Return>", lambda e: self.search_books())
         
         # Sprachfilter
         self.language_filter_var = tk.StringVar(value="all")
@@ -284,48 +289,37 @@ class GutenbergBookSearchDialog:
         self.status_label.pack(fill=tk.X, pady=5)
     
     def load_catalog(self):
-        """Lädt den Gutenberg-Katalog (simuliert für dieses Beispiel)"""
+        """Lädt den Gutenberg-Katalog aus der CSV-Datei"""
         self.status_var.set(translations[self.current_language]['loading_catalog'])
         
-        # In einer echten Anwendung würde hier der Katalog von einer API geladen
-        # Für dieses Beispiel laden wir einen kleinen Testdatensatz
+        # Starte den Ladevorgang in einem separaten Thread
         threading.Thread(target=self._load_catalog_thread).start()
     
     def _load_catalog_thread(self):
         """Lädt den Katalog im Hintergrund"""
         try:
-            # Hier würde normalerweise der API-Aufruf erfolgen
-            # Für dieses Beispiel simulieren wir eine Verzögerung und laden einen Testdatensatz
-            time.sleep(1)
+            # CSV-Katalog von Project Gutenberg herunterladen
+            GUTENBERG_CSV_URL = "https://www.gutenberg.org/cache/epub/feeds/pg_catalog.csv.gz"
             
-            # In einer echten Anwendung würde der Katalog von einer API kommen
-            # Testdaten für deutsche und englische Bücher
-            self.catalog = [
-                {"id": 62575, "title": "Nebel der Andromeda", "author": "Fritz Brehmer", "language": "de"},
-                {"id": 1228, "title": "Die Verwandlung", "author": "Franz Kafka", "language": "de"},
-                {"id": 5648, "title": "Also sprach Zarathustra", "author": "Friedrich Nietzsche", "language": "de"},
-                {"id": 2229, "title": "Siddhartha", "author": "Hermann Hesse", "language": "de"},
-                {"id": 11, "title": "Alice's Adventures in Wonderland", "author": "Lewis Carroll", "language": "en"},
-                {"id": 1342, "title": "Pride and Prejudice", "author": "Jane Austen", "language": "en"},
-                {"id": 76, "title": "Adventures of Huckleberry Finn", "author": "Mark Twain", "language": "en"},
-                {"id": 84, "title": "Frankenstein", "author": "Mary Shelley", "language": "en"},
-                {"id": 2701, "title": "Moby Dick", "author": "Herman Melville", "language": "en"},
-                {"id": 1952, "title": "The Yellow Wallpaper", "author": "Charlotte Perkins Gilman", "language": "en"},
-                {"id": 345, "title": "Dracula", "author": "Bram Stoker", "language": "en"},
-                {"id": 98, "title": "A Tale of Two Cities", "author": "Charles Dickens", "language": "en"},
-                {"id": 19942, "title": "Die Leiden des jungen Werther", "author": "Johann Wolfgang von Goethe", "language": "de"},
-                {"id": 2600, "title": "War and Peace", "author": "Leo Tolstoy", "language": "en"},
-                {"id": 6130, "title": "Der Stechlin", "author": "Theodor Fontane", "language": "de"},
-                {"id": 7205, "title": "Faust", "author": "Johann Wolfgang von Goethe", "language": "de"},
-                {"id": 8242, "title": "Effi Briest", "author": "Theodor Fontane", "language": "de"},
-                {"id": 16328, "title": "Beowulf", "author": "Unknown", "language": "en"},
-                {"id": 2554, "title": "Crime and Punishment", "author": "Fyodor Dostoevsky", "language": "en"},
-                {"id": 219, "title": "Heart of Darkness", "author": "Joseph Conrad", "language": "en"}
-            ]
-            
-            # Verwende after, um die UI sicher zu aktualisieren
-            self.dialog.after(0, lambda: self._update_catalog())
-            
+            try:
+                import gzip
+                from io import BytesIO, StringIO
+                
+                # Die komprimierte Datei herunterladen
+                response = requests.get(GUTENBERG_CSV_URL)
+                
+                # Die komprimierten Daten dekomprimieren
+                with gzip.open(BytesIO(response.content), 'rt', encoding='utf-8') as f:
+                    # CSV-Daten einlesen
+                    self.catalog = list(csv.DictReader(f))
+                
+                # Verwende after, um die UI sicher zu aktualisieren
+                self.dialog.after(0, lambda: self._update_catalog())
+                
+            except Exception as e:
+                error_message = f"Fehler beim Laden des Katalogs: {str(e)}"
+                self.dialog.after(0, lambda: self.status_var.set(error_message))
+                
         except Exception as e:
             error_message = f"{translations[self.current_language]['catalog_error']}: {str(e)}"
             self.dialog.after(0, lambda: self.status_var.set(error_message))
@@ -335,20 +329,23 @@ class GutenbergBookSearchDialog:
         if not self.dialog.winfo_exists():
             return  # Dialog wurde bereits geschlossen
         
-        try:
-            # Daten in Tabelle laden
-            for book in self.catalog:
-                self.results_table.insert('', 'end', values=(book["id"], book["title"], book["author"], book["language"]))
-            
-            self.status_var.set(f"{len(self.catalog)} Bücher geladen")
-        except Exception as e:
-            print(f"Fehler beim Aktualisieren des Katalogs: {e}")
+        # Zeige die ersten 100 Bücher an
+        self.status_var.set(f"Katalog geladen: {len(self.catalog)} Bücher verfügbar. Bitte Suchbegriff eingeben.")
+        
+        # Zeige keine Bücher an, bis eine Suche durchgeführt wurde
+        # Das verbessert die Leistung, da der Katalog sehr groß sein kann
     
     def search_books(self):
         """Durchsucht den Katalog nach den angegebenen Kriterien"""
         search_term = self.search_var.get().lower()
         if search_term == translations[self.current_language]['search_placeholder'].lower():
             search_term = ""
+        
+        if not search_term:
+            self.status_var.set("Bitte einen Suchbegriff eingeben")
+            return
+            
+        self.status_var.set(f"Suche nach '{search_term}'...")
         
         language_filter = self.language_filter_var.get()
         
@@ -360,18 +357,31 @@ class GutenbergBookSearchDialog:
         filtered_books = []
         for book in self.catalog:
             # Sprachfilter
-            if language_filter != "all" and book["language"] != language_filter:
+            if language_filter != "all" and book["Language"] != language_filter:
                 continue
             
             # Textsuche
-            if search_term and search_term not in book["title"].lower() and search_term not in book["author"].lower():
+            if search_term and search_term not in book["Title"].lower() and search_term not in book["Authors"].lower():
                 continue
             
             filtered_books.append(book)
-            self.results_table.insert('', 'end', values=(book["id"], book["title"], book["author"], book["language"]))
+            
+            # Begrenze auf 100 Ergebnisse für bessere Leistung
+            if len(filtered_books) >= 100:
+                break
+        
+        # Ergebnisse in Tabelle anzeigen
+        for book in filtered_books:
+            self.results_table.insert('', 'end', values=(
+                book["Text#"], 
+                book["Title"][:100] + ("..." if len(book["Title"]) > 100 else ""), 
+                book["Authors"][:100] + ("..." if len(book["Authors"]) > 100 else ""), 
+                book["Language"]
+            ))
         
         if filtered_books:
-            self.status_var.set(f"{len(filtered_books)} {translations[self.current_language]['results']}")
+            self.status_var.set(f"{len(filtered_books)} {translations[self.current_language]['results']}" + 
+                              (", angezeigt werden die ersten 100" if len(filtered_books) > 100 else ""))
         else:
             self.status_var.set(translations[self.current_language]['no_results'])
     
@@ -392,7 +402,7 @@ class GutenbergBookSearchDialog:
         self.status_var.set(translations[self.current_language]['loading'])
         self.preview_text.delete(1.0, tk.END)
         
-        # In einer echten Anwendung würde hier der Inhalt des Buchs geladen
+        # Lade die Buchvorschau im Hintergrund
         threading.Thread(target=self._load_preview_thread, args=(book_id,)).start()
     
     def _load_preview_thread(self, book_id):
@@ -410,7 +420,13 @@ class GutenbergBookSearchDialog:
                 with urllib.request.urlopen(url) as response:
                     text = response.read().decode('latin-1', errors='replace')
             except Exception as e:
-                raise Exception(f"Fehler beim Herunterladen: {str(e)}")
+                # Versuche alternative URL
+                try:
+                    alt_url = f"https://www.gutenberg.org/files/{book_id}/{book_id}-0.txt"
+                    with urllib.request.urlopen(alt_url) as response:
+                        text = response.read().decode('utf-8', errors='replace')
+                except Exception:
+                    raise Exception(f"Fehler beim Herunterladen: {str(e)}")
             
             # Prüfen, ob Text leer ist
             if not text or len(text.strip()) == 0:
@@ -1260,7 +1276,7 @@ Möchten Sie mit der Konvertierung fortfahren?
                 'input_file', 'output_folder', 'tts', 'one_file', 'preview', 
                 'output_text', 'remove_endnotes', 'log', 'newline_mode', 
                 'title_mode', 'language', 'voice_name', 'output_format', 
-                'model_name', 'break_duration', 'text_mode'
+                'model_name', 'break_duration', 'text_mode', 'custom_filename'
             ]
             
             # Filtere Optionen, so dass nur erlaubte Parameter übrigbleiben
@@ -1280,6 +1296,10 @@ Möchten Sie mit der Konvertierung fortfahren?
                 filtered_options['input_file'] = temp_text_file.name
                 # Setze Text-Modus für die Verarbeitung
                 filtered_options['text_mode'] = True
+                
+                # Setze ein Flag für benutzerdefinierten Dateinamen 
+                # (wird später in epub_to_audiobook verwendet)
+                filtered_options['custom_filename'] = self.sanitize_filename(f"{self.gutenberg_text['title']} - {self.gutenberg_text['author']}")
                 
                 print(f"Temporäre Textdatei erstellt: {temp_text_file.name}")
 
@@ -1346,6 +1366,17 @@ Möchten Sie mit der Konvertierung fortfahren?
             self.is_converting = False
             self.start_button.config(state=tk.NORMAL)
 
+    def sanitize_filename(self, filename):
+        """Entfernt ungültige Zeichen aus dem Dateinamen und kürzt ihn bei Bedarf"""
+        # Ersetze Sonderzeichen durch Unterstriche
+        sanitized = re.sub(r'[\\/*?:"<>|]', "_", filename)
+        # Entferne mehrfache Unterstriche
+        sanitized = re.sub(r'_+', "_", sanitized)
+        # Kürze auf max. 100 Zeichen (für Dateisystembeschränkungen)
+        if len(sanitized) > 100:
+            sanitized = sanitized[:97] + "..."
+        return sanitized
+
     def start_conversion(self):
         """Startet die Konvertierung mit Validierung und Kostenschätzung"""
         if self.is_converting:
@@ -1380,9 +1411,14 @@ Möchten Sie mit der Konvertierung fortfahren?
                 self.is_converting = False
                 return
 
-            # Lese die EPUB-Datei und schätze die Kosten
+            # Füge einen kundenspezifischen Dateinamen basierend auf dem Buch hinzu
             try:
                 book = epub.read_epub(options['input_file'])
+                book_title = book.get_metadata('DC', 'title')[0][0]
+                author = book.get_metadata('DC', 'creator')[0][0]
+                options['custom_filename'] = self.sanitize_filename(f"{book_title} - {author}")
+                
+                # Berechne die ungefähre Textlänge für Kostenschätzung
                 total_chars = 0
                 for item in book.get_items():
                     if item.get_type() == ebooklib.ITEM_DOCUMENT:
