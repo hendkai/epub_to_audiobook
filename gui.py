@@ -1202,15 +1202,15 @@ class EpubToAudiobookGUI:
         # Standard (Neural) Voices: $16.00 per 1 million characters
         # Premium (Neural) Voices: $24.00 per 1 million characters
         
-        # OpenAI TTS Preise (Stand: März 2024)
-        # TTS-1: $0.015 per 1,000 characters
-        # TTS-1-HD: $0.030 per 1,000 characters
+        # OpenAI TTS Preise (Stand: April 2024)
+        # TTS-1: $15.00 per 1 million characters
+        # TTS-1-HD: $30.00 per 1 million characters
         
         costs = {
             'azure_standard': (text_length / 1_000_000) * 16.00,
             'azure_premium': (text_length / 1_000_000) * 24.00,
-            'openai_tts1': (text_length / 1_000) * 0.015,
-            'openai_tts1_hd': (text_length / 1_000) * 0.030
+            'openai_tts1': (text_length / 1_000_000) * 15.00,
+            'openai_tts1_hd': (text_length / 1_000_000) * 30.00
         }
         
         return costs
