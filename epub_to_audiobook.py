@@ -22,7 +22,9 @@ import time
 import configparser
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from pydub import AudioSegment
+import subprocess
+import wave
+import tempfile
 
 logging.basicConfig(
     level=logging.INFO,
@@ -382,7 +384,7 @@ def is_special_char(char: str) -> bool:
     ord_char = ord(char)
     result = (
         (ord_char >= 33 and ord_char <= 126)
-        or (char in "。，、？！：；“”‘’（）《》【】…—～·「」『』〈〉〖〗〔〕")
+        or (char in "。，、？！：；""''（）《》【】…—～·「」『』〈〉〖〗〔〕")
         or (char in "∶")
     )  # special unicode punctuation
     logger.debug(f"is_special_char> char={char}, ord={ord_char}, result={result}")
@@ -446,118 +448,163 @@ def set_audio_tags(output_file, audio_tags):
         raise e  # TODO: use this raise to catch unknown errors for now
 
 
-def process_chapter(chapter: Tuple[str, str], tts_provider: TTSProvider, output_folder: str, book_title: str, author: str, idx: int) -> AudioSegment:
-    """
-    Verarbeitet ein einzelnes Kapitel und konvertiert es in Audio.
-    
-    Args:
-        chapter: Tuple aus (Titel, Text) des Kapitels
-        tts_provider: Der TTS-Provider für die Audiokonvertierung
-        output_folder: Ausgabeordner für die Audiodateien
-        book_title: Titel des Buches
-        author: Autor des Buches
-        idx: Index des Kapitels
-    
-    Returns:
-        AudioSegment: Das verarbeitete Audiokapitel
-    """
+def process_audio(input_file: str, output_file: str, format: str = 'mp3'):
+    """Process audio using ffmpeg with high quality settings"""
+    try:
+        # Convert to desired format using ffmpeg with high quality settings
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', input_file,
+            '-b:a', '192k',  # Set bitrate to 192kbps
+            '-ar', '44100',  # Set sample rate to 44.1kHz
+            '-ac', '2',      # Set to stereo
+            '-q:a', '0',     # Highest quality for MP3
+            output_file
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error processing audio: {e}")
+        return False
+
+
+def process_chapter(chapter: Tuple[str, str], tts_provider: TTSProvider, output_folder: str, book_title: str, author: str, idx: int) -> str:
     title, text = chapter
+    sanitized_title = sanitize_title(title)
     
-    # Erstelle die Ausgabedatei
-    output_file = os.path.join(output_folder, f"chapter_{idx:03d}_{title}.mp3")
-    
-    # Erstelle die Audio-Tags
+    # Create audio tags
     audio_tags = AudioTags(
-        title=title,
+        title=sanitized_title,
         author=author,
         book_title=book_title,
-        idx=idx
+        idx=idx,
     )
     
-    # Konvertiere Text zu Sprache
-    tts_provider.text_to_speech(text, output_file, audio_tags)
+    # Create temporary file for initial audio
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+        temp_path = temp_file.name
     
-    # Lade die erstellte Audiodatei
-    return AudioSegment.from_mp3(output_file)
+    # Generate audio file
+    tts_provider.text_to_speech(text, temp_path, audio_tags)
+    
+    # Process audio to final format
+    output_path = os.path.join(output_folder, f"{idx:03d}_{sanitized_title}.{tts_provider.general_config.output_format}")
+    success = process_audio(temp_path, output_path, tts_provider.general_config.output_format)
+    
+    # Clean up temporary file
+    os.unlink(temp_path)
+    
+    if not success:
+        raise Exception(f"Failed to process audio for chapter {sanitized_title}")
+    
+    return output_path
+
 
 def epub_to_audiobook(tts_provider: TTSProvider):
     # assign config values
-    conf = tts_provider.general_config
-    input_file = conf.input_file
-    output_folder = conf.output_folder
-    preview = conf.preview
-    newline_mode = conf.newline_mode
-    chapter_start = conf.chapter_start
-    chapter_end = conf.chapter_end
-    remove_endnotes = conf.remove_endnotes
-    output_text = conf.output_text
-    one_file = conf.one_file
+    input_file = tts_provider.general_config.input_file
+    output_folder = tts_provider.general_config.output_folder
+    preview = tts_provider.general_config.preview
+    newline_mode = tts_provider.general_config.newline_mode
+    chapter_start = tts_provider.general_config.chapter_start
+    chapter_end = tts_provider.general_config.chapter_end
+    output_text = tts_provider.general_config.output_text
+    remove_endnotes = tts_provider.general_config.remove_endnotes
+    one_file = tts_provider.general_config.one_file
 
-    book = epub.read_epub(input_file)
-    chapters = extract_chapters(book, newline_mode, remove_endnotes)
+    logger.info(f"Converting {input_file} to audiobook with config: {tts_provider}")
 
+    # Create output folder if it doesn't exist
     os.makedirs(output_folder, exist_ok=True)
 
-    # Get the book title and author from metadata or use fallback values
-    book_title = "Untitled"
-    author = "Unknown"
-    if book.get_metadata("DC", "title"):
-        book_title = book.get_metadata("DC", "title")[0][0]
-    if book.get_metadata("DC", "creator"):
-        author = book.get_metadata("DC", "creator")[0][0]
+    # Read epub file
+    book = epub.read_epub(input_file)
 
-    # Filter out empty or very short chapters
-    chapters = [(title, text) for title, text in chapters if text.strip()]
+    # Get book title and author
+    book_title = book.get_metadata('DC', 'title')[0][0]
+    author = book.get_metadata('DC', 'creator')[0][0]
 
-    logger.info(f"Chapters count: {len(chapters)}.")
+    # Extract chapters
+    chapters = extract_chapters(book, newline_mode, remove_endnotes)
+    total_chapters = len(chapters)
 
-    # Check chapter start and end args
-    if chapter_start < 1 or chapter_start > len(chapters):
-        raise ValueError(
-            f"Chapter start index {chapter_start} is out of range. Check your input."
-        )
-    if chapter_end < -1 or chapter_end > len(chapters):
-        raise ValueError(
-            f"Chapter end index {chapter_end} is out of range. Check your input."
-        )
     if chapter_end == -1:
-        chapter_end = len(chapters)
-    if chapter_start > chapter_end:
-        raise ValueError(
-            f"Chapter start index {chapter_start} is larger than chapter end index {chapter_end}. Check your input."
-        )
+        chapter_end = total_chapters
 
-    total_characters = 0  # Variable initialisieren
+    # Validate chapter range
+    if chapter_start < 1 or chapter_start > total_chapters:
+        raise ValueError(f"Invalid chapter_start: {chapter_start}. Must be between 1 and {total_chapters}")
+    if chapter_end < chapter_start or chapter_end > total_chapters:
+        raise ValueError(f"Invalid chapter_end: {chapter_end}. Must be between {chapter_start} and {total_chapters}")
 
-    start_time = time.time()  # Startzeit messen
+    # Adjust for 0-based indexing
+    chapter_start -= 1
+    chapter_end -= 1
 
-    # Überprüfen Sie die one_file Option
-    if one_file:
-        # Logik für einzelne Ausgabedatei
-        combined_audio = AudioSegment.empty()
-        for idx, chapter in enumerate(chapters[chapter_start-1:chapter_end], start=chapter_start):
-            # Verarbeite jeden Chapter
-            audio = process_chapter(chapter, tts_provider, output_folder, book_title, author, idx)
-            combined_audio += audio
-            total_characters += len(chapter[1])
+    # Select chapters to process
+    chapters = chapters[chapter_start:chapter_end + 1]
+
+    if preview:
+        logger.info("Preview mode: Showing chapters without converting to audio")
+        for idx, (title, text) in enumerate(chapters, start=chapter_start + 1):
+            logger.info(f"\nChapter {idx}: {title}")
+            logger.info(f"Text length: {len(text)} characters")
+            logger.info(f"First 500 characters: {text[:500]}...")
+        return
+
+    # Process chapters
+    total_characters = 0
+    chapter_files = []
+
+    for idx, chapter in enumerate(chapters, start=chapter_start + 1):
+        logger.info(f"Processing chapter {idx}/{chapter_end + 1}: {chapter[0]}")
+        
+        if output_text:
+            # Save chapter text
+            text_file = os.path.join(output_folder, f"{idx:03d}_{sanitize_title(chapter[0])}.txt")
+            with open(text_file, "w", encoding="utf-8") as f:
+                f.write(chapter[1])
+
+        # Process chapter audio
+        output_file = process_chapter(chapter, tts_provider, output_folder, book_title, author, idx)
+        chapter_files.append(output_file)
+        total_characters += len(chapter[1])
+
+    if one_file and len(chapter_files) > 1:
+        logger.info("Combining all chapters into one file...")
+        
+        # Create file list for ffmpeg
+        list_file = os.path.join(output_folder, "files.txt")
+        with open(list_file, "w") as f:
+            for file in chapter_files:
+                f.write(f"file '{file}'\n")
+        
+        # Combine files using ffmpeg with high quality settings
+        output_file = os.path.join(output_folder, f"complete_audiobook.{tts_provider.general_config.output_format}")
+        cmd = [
+            'ffmpeg', '-y',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', list_file,
+            '-b:a', '192k',  # Set bitrate to 192kbps
+            '-ar', '44100',  # Set sample rate to 44.1kHz
+            '-ac', '2',      # Set to stereo
+            '-q:a', '0',     # Highest quality for MP3
+            output_file
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+            logger.info(f"Combined audiobook saved to: {output_file}")
             
-        # Speichere die kombinierte Audiodatei
-        output_file = os.path.join(output_folder, f"{book_title}_complete.mp3")
-        combined_audio.export(output_file, format="mp3")
-    else:
-        # Bestehende Logik für mehrere Dateien
-        for idx, chapter in enumerate(chapters[chapter_start-1:chapter_end], start=chapter_start):
-            audio = process_chapter(chapter, tts_provider, output_folder, book_title, author, idx)
-            total_characters += len(chapter[1])
+            # Clean up individual chapter files and list file
+            for file in chapter_files:
+                os.remove(file)
+            os.remove(list_file)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error combining audio files: {e}")
+            logger.info("Individual chapter files have been preserved.")
 
-    elapsed_time = time.time() - start_time  # Gesamtzeit berechnen
-
-    logger.info(f"✨ Total characters in selected chapters: {total_characters} ✨")
-    logger.info(f"⌛ Elapsed Time: {elapsed_time:.2f} seconds ⌛")
-
-    # Überprüfen Sie das Ausgabeformat
-    if tts_provider.general_config.output_format.lower() != "mp3":
-        raise ValueError("Das Ausgabeformat muss mp3 sein.")
+    logger.info(f"Finished processing {len(chapters)} chapters ({total_characters} characters)")
 
 def clean_text(text: str) -> str:
     """Clean the text by removing unwanted characters and normalizing whitespace."""

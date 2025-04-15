@@ -1,31 +1,38 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.pyc
-
-# Virtual environment
+# Python virtuelle Umgebung
 venv/
+env/
+.env/
 
-# Temporary files
-*.tmp
+# Python Cache-Dateien
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / Packaging
+dist/
+build/
+*.egg-info/
+
+# IDE-spezifische Dateien
+.idea/
+.vscode/
 *.swp
 *.swo
-*.bak
-*.log
-*.cache
 
-# OS-specific files
+# Lokale Konfigurationsdateien
+gui_settings.json
+
+# Temporäre Dateien
+*.tmp
+*.temp
+*.log
+
+# Ausgabedateien
+*.mp3
+*.wav
+*.txt
+!requirements.txt
+
+# Betriebssystem-spezifische Dateien
 .DS_Store
 Thumbs.db
-
-.vscode
-
-# audio files
-audiobook_output/
-
-private_examples/
-
-# GUI settings
-gui_settings.json
