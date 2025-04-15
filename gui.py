@@ -77,7 +77,11 @@ translations = {
         'book_preview': 'Buchvorschau',
         'load_book': 'Buch laden',
         'close': 'Schließen',
-        'no_gutenberg_id': 'Bitte geben Sie eine gültige Gutenberg ID oder URL ein'
+        'no_gutenberg_id': 'Bitte geben Sie eine gültige Gutenberg ID oder URL ein',
+        'epub_created': 'EPUB-Datei erfolgreich erstellt',
+        'preview_button': 'Vorschau',
+        'no_text_loaded': 'Kein Text geladen',
+        'info': 'Vorschau'
     },
     'en': {
         'title': 'EPUB to Audiobook Converter',
@@ -140,7 +144,11 @@ translations = {
         'book_preview': 'Book Preview',
         'load_book': 'Load Book',
         'close': 'Close',
-        'no_gutenberg_id': 'Please enter a valid Gutenberg ID or URL'
+        'no_gutenberg_id': 'Please enter a valid Gutenberg ID or URL',
+        'epub_created': 'EPUB file successfully created',
+        'preview_button': 'Preview',
+        'no_text_loaded': 'No text loaded',
+        'info': 'Preview'
     }
 }
 
@@ -153,6 +161,9 @@ class GutenbergBookSearchDialog:
         self.dialog.title(translations[self.current_language]['search_gutenberg'])
         self.dialog.geometry("900x700")  # Größeres Startfenster
         self.dialog.minsize(800, 600)    # Größere Mindestfenstergröße
+        
+        # Status-Variable für Meldungen
+        self.status_var = tk.StringVar()
         
         self.setup_ui()
         self.load_catalog()
@@ -268,10 +279,9 @@ class GutenbergBookSearchDialog:
         status_frame = ttk.Frame(main_frame)
         status_frame.pack(fill=tk.X, pady=5)
         
-        self.status_var = tk.StringVar()
-        status_label = ttk.Label(status_frame, textvariable=self.status_var, 
+        self.status_label = ttk.Label(status_frame, textvariable=self.status_var, 
                                font=('TkDefaultFont', 10, 'bold'))  # Fett für bessere Sichtbarkeit
-        status_label.pack(fill=tk.X, pady=5)
+        self.status_label.pack(fill=tk.X, pady=5)
     
     def load_catalog(self):
         """Lädt den Gutenberg-Katalog (simuliert für dieses Beispiel)"""
@@ -460,7 +470,6 @@ class EpubToAudiobookGUI:
         self.is_converting = False
         self.gutenberg_text = None
         self.temp_epub_file = None
-        self.status_var = tk.StringVar()  # Status-Variable für Statusmeldungen
 
         self.create_widgets()
         self.load_settings()
@@ -474,6 +483,9 @@ class EpubToAudiobookGUI:
         style.configure("TCombobox", fieldbackground="#3E3E3E", foreground="#FFFFFF")
         style.configure("TProgressbar", background="#4CAF50")
 
+        # Status Variable für Meldungen
+        self.status_var = tk.StringVar()
+        
         # GUI-Sprachauswahl (UI-Sprache)
         language_frame = ttk.Frame(self.root)
         language_frame.grid(row=0, column=0, columnspan=3, padx=10, pady=5, sticky="w")
@@ -519,24 +531,8 @@ class EpubToAudiobookGUI:
         self.input_file_button = ttk.Button(self.local_file_frame, text=translations[self.current_language]['browse'], command=self.browse_input_file)
         self.input_file_button.grid(row=0, column=2, padx=5, pady=5)
 
-        # Gutenberg Frame
-        self.gutenberg_frame = ttk.Frame(self.required_frame)
-        self.gutenberg_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
-        self.gutenberg_frame.grid_remove()  # Hidden by default
-        
-        self.gutenberg_id_label = ttk.Label(self.gutenberg_frame, text=translations[self.current_language]['gutenberg_id'])
-        self.gutenberg_id_label.grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        self.gutenberg_id_entry = ttk.Entry(self.gutenberg_frame, width=40)
-        self.gutenberg_id_entry.grid(row=0, column=1, padx=5, pady=5)
-        
-        gutenberg_buttons_frame = ttk.Frame(self.gutenberg_frame)
-        gutenberg_buttons_frame.grid(row=0, column=2, padx=5, pady=5)
-        
-        self.gutenberg_browse_button = ttk.Button(gutenberg_buttons_frame, text=translations[self.current_language]['search'], command=self.browse_gutenberg)
-        self.gutenberg_browse_button.pack(side=tk.LEFT, padx=2)
-        
-        self.gutenberg_load_button = ttk.Button(gutenberg_buttons_frame, text=translations[self.current_language]['load_gutenberg'], command=self.load_gutenberg_text)
-        self.gutenberg_load_button.pack(side=tk.LEFT, padx=2)
+        # Gutenberg Frame - Diese Methode wird neu erstellt
+        self.create_gutenberg_frame()
 
         # Output Folder
         self.output_folder_label = ttk.Label(self.required_frame, text=translations[self.current_language]['output_folder'])
@@ -565,20 +561,31 @@ class EpubToAudiobookGUI:
                                         values=["de-DE", "en-US", "en-GB", "fr-FR", "es-ES", "it-IT", "zh-CN", "ja-JP"])
         self.tts_language_menu.grid(row=1, column=1, padx=5, pady=5)
 
+        # OpenAI Modell
+        self.model_label = ttk.Label(self.tts_frame, text="Modell")
+        self.model_label.grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        self.model_var = tk.StringVar(value="tts-1")
+        self.model_menu = ttk.Combobox(self.tts_frame, textvariable=self.model_var,
+                                     values=["tts-1", "tts-1-hd"])
+        self.model_menu.grid(row=2, column=1, padx=5, pady=5)
+        # Standardmäßig ausblenden
+        self.model_label.grid_remove()
+        self.model_menu.grid_remove()
+
         # Stimmeinstellungen
         self.voice_label = ttk.Label(self.tts_frame, text=translations[self.current_language]['voice'])
-        self.voice_label.grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        self.voice_label.grid(row=3, column=0, padx=5, pady=5, sticky="e")
         self.voice_var = tk.StringVar()
         self.voice_menu = ttk.Combobox(self.tts_frame, textvariable=self.voice_var)
-        self.voice_menu.grid(row=2, column=1, padx=5, pady=5)
+        self.voice_menu.grid(row=3, column=1, padx=5, pady=5)
 
         # Ausgabeformat
         self.format_label = ttk.Label(self.tts_frame, text=translations[self.current_language]['output_format'])
-        self.format_label.grid(row=3, column=0, padx=5, pady=5, sticky="e")
+        self.format_label.grid(row=4, column=0, padx=5, pady=5, sticky="e")
         self.format_var = tk.StringVar(value="mp3")
         self.format_menu = ttk.Combobox(self.tts_frame, textvariable=self.format_var,
                                       values=["mp3", "wav", "ogg", "m4a"])
-        self.format_menu.grid(row=3, column=1, padx=5, pady=5)
+        self.format_menu.grid(row=4, column=1, padx=5, pady=5)
 
         # Optional Settings Tab
         self.optional_frame = ttk.Frame(self.notebook)
@@ -675,6 +682,10 @@ class EpubToAudiobookGUI:
         # Progress Bar
         self.progress = ttk.Progressbar(self.root, orient="horizontal", length=400, mode="determinate")
         self.progress.grid(row=4, column=0, columnspan=3, padx=10, pady=10)
+        
+        # Status Label
+        self.status_label = ttk.Label(self.root, textvariable=self.status_var)
+        self.status_label.grid(row=5, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
 
         # Event Handler für Provider-Änderung
         self.tts_provider_var.trace_add("write", self.on_provider_change)
@@ -689,17 +700,29 @@ class EpubToAudiobookGUI:
             self.voice_menu['values'] = ["de-DE-KatjaNeural", "en-US-JennyNeural", "en-GB-SoniaNeural", 
                                        "fr-FR-DeniseNeural", "es-ES-ElviraNeural", "it-IT-ElsaNeural",
                                        "zh-CN-XiaoxiaoNeural", "ja-JP-NanamiNeural"]
+            # Verstecke OpenAI-Modellauswahl
+            self.model_label.grid_remove()
+            self.model_menu.grid_remove()
         elif provider == "openai":
             self.tts_language_menu['values'] = ["en-US", "en-GB"]
             self.voice_menu['values'] = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+            # Zeige OpenAI-Modellauswahl
+            self.model_label.grid()
+            self.model_menu.grid()
         elif provider == "edge":
             self.tts_language_menu['values'] = ["de-DE", "en-US", "en-GB", "fr-FR", "es-ES", "it-IT"]
             self.voice_menu['values'] = ["de-DE-Katja", "en-US-Guy", "en-GB-Susan", 
                                        "fr-FR-Julie", "es-ES-Laura", "it-IT-Elsa"]
+            # Verstecke OpenAI-Modellauswahl
+            self.model_label.grid_remove()
+            self.model_menu.grid_remove()
         elif provider == "piper":
             self.tts_language_menu['values'] = ["de-DE", "en-US", "en-GB", "fr-FR", "es-ES", "it-IT"]
             self.voice_menu['values'] = ["de_DE-thorsten", "en_US-libritts_r", "en_GB-northern_english_male",
                                        "fr_FR-siwis", "es_ES-davefx", "it_IT-riccardo_fasol"]
+            # Verstecke OpenAI-Modellauswahl
+            self.model_label.grid_remove()
+            self.model_menu.grid_remove()
 
         # Aktualisiere verfügbare Formate
         if provider in ["azure", "openai"]:
@@ -727,6 +750,83 @@ class EpubToAudiobookGUI:
         else:  # gutenberg_project
             self.local_file_frame.grid_remove()
             self.gutenberg_frame.grid()
+
+    def create_gutenberg_frame(self):
+        """Erstellt den Frame für Project Gutenberg"""
+        self.gutenberg_frame = ttk.Frame(self.required_frame)
+        self.gutenberg_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+        self.gutenberg_frame.grid_remove()  # Hidden by default
+        
+        self.gutenberg_id_label = ttk.Label(self.gutenberg_frame, text=translations[self.current_language]['gutenberg_id'])
+        self.gutenberg_id_label.grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        self.gutenberg_id_entry = ttk.Entry(self.gutenberg_frame, width=40)
+        self.gutenberg_id_entry.grid(row=0, column=1, padx=5, pady=5)
+        
+        gutenberg_buttons_frame = ttk.Frame(self.gutenberg_frame)
+        gutenberg_buttons_frame.grid(row=0, column=2, padx=5, pady=5)
+        
+        self.gutenberg_browse_button = ttk.Button(gutenberg_buttons_frame, text=translations[self.current_language]['search'], command=self.browse_gutenberg)
+        self.gutenberg_browse_button.pack(side=tk.LEFT, padx=2)
+        
+        self.gutenberg_load_button = ttk.Button(gutenberg_buttons_frame, text=translations[self.current_language]['load_gutenberg'], command=self.load_gutenberg_text)
+        self.gutenberg_load_button.pack(side=tk.LEFT, padx=2)
+        
+        # Neuer Vorschau-Button und Anzeige
+        if 'preview_button' not in translations['de']:
+            translations['de']['preview_button'] = 'Vorschau'
+            translations['en']['preview_button'] = 'Preview'
+        
+        self.preview_button = ttk.Button(self.gutenberg_frame, text=translations[self.current_language]['preview_button'], 
+                                   command=self.show_text_preview, state=tk.DISABLED)
+        self.preview_button.grid(row=1, column=1, pady=5)
+
+    def show_text_preview(self):
+        """Zeigt eine Vorschau des bereinigten Textes an"""
+        if not self.gutenberg_text:
+            messagebox.showinfo(translations[self.current_language]['info'], 
+                              translations[self.current_language]['no_text_loaded'])
+            return
+        
+        # Erstelle ein neues Fenster
+        preview_window = tk.Toplevel(self.root)
+        preview_window.title(f"{translations[self.current_language]['preview_button']}: {self.gutenberg_text['title']}")
+        preview_window.geometry("800x600")
+        
+        # Füge Informationen über das Buch hinzu
+        info_frame = ttk.Frame(preview_window, padding=10)
+        info_frame.pack(fill=tk.X)
+        
+        ttk.Label(info_frame, text=f"{translations[self.current_language]['title']}: {self.gutenberg_text['title']}",
+                font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
+        ttk.Label(info_frame, text=f"{translations[self.current_language]['author']}: {self.gutenberg_text['author']}").pack(anchor=tk.W)
+        ttk.Label(info_frame, text=f"Gutenberg ID: {self.gutenberg_text['id']}").pack(anchor=tk.W)
+        
+        # Textzwischenraum
+        ttk.Separator(preview_window, orient='horizontal').pack(fill=tk.X, padx=10, pady=5)
+        
+        # Text mit Scrollbar
+        text_frame = ttk.Frame(preview_window)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Text-Widget
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set)
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=text_widget.yview)
+        
+        # Text einfügen
+        text_widget.insert(tk.END, self.gutenberg_text['text'])
+        
+        # Schließen-Button
+        button_frame = ttk.Frame(preview_window, padding=10)
+        button_frame.pack(fill=tk.X)
+        
+        close_button = ttk.Button(button_frame, text=translations[self.current_language]['close'], 
+                               command=preview_window.destroy)
+        close_button.pack(side=tk.RIGHT)
 
     def load_gutenberg_text(self):
         """Lädt Text von Gutenberg basierend auf Gutenberg-ID oder URL"""
@@ -787,7 +887,7 @@ class EpubToAudiobookGUI:
                 self.status_var.set("")
                 return
                 
-            # Titel und Autor extrahieren für besseren EPUB-Titel
+            # Titel und Autor extrahieren für besseren Titel
             title = f"Gutenberg Book {gutenberg_id}"
             author = "Unknown"
             
@@ -799,62 +899,226 @@ class EpubToAudiobookGUI:
             if author_match:
                 author = author_match.group(1).strip()
             
-            # Haupttext extrahieren
-            main_text = ""
-            if "*** START OF" in text and "*** END OF" in text:
-                start_pos = text.find("*** START OF")
-                start_pos = text.find("\n", start_pos) + 1
-                end_pos = text.find("*** END OF")
-                
-                if start_pos > 0 and end_pos > start_pos:
-                    main_text = text[start_pos:end_pos].strip()
+            # Haupttext extrahieren - Project Gutenberg Metadaten entfernen
+            main_text = self.clean_gutenberg_text(text)
             
-            # Wenn die Extraktion fehlschlägt, verwenden wir den gesamten Text
-            if not main_text:
-                main_text = text
+            # Speichere den Text und Metadaten
+            self.gutenberg_text = {
+                'title': title,
+                'author': author,
+                'text': main_text,
+                'id': gutenberg_id
+            }
             
-            # EPUB erstellen
-            book = ebooklib.epub.EpubBook()
-            book.set_title(title)
-            book.set_language('en')
-            book.add_author(author)
+            # Aktiviere den Vorschau-Button
+            self.preview_button.config(state=tk.NORMAL)
             
-            # Kapitel erstellen
-            chapter = ebooklib.epub.EpubHtml(title=title, file_name='chapter.xhtml')
-            chapter.content = f'<html><body><h1>{title}</h1><p>{main_text.replace(chr(10), "</p><p>")}</p></body></html>'
+            # Zeige einen Erfolgshinweis an
+            self.status_var.set(f"{translations[self.current_language]['gutenberg_success']}: {title}")
             
-            book.add_item(chapter)
-            book.toc = [chapter]
-            book.spine = ['nav', chapter]
-            book.add_item(ebooklib.epub.EpubNcx())
-            book.add_item(ebooklib.epub.EpubNav())
+            # Quelle auf "gutenberg_text" setzen und die lokale Datei deaktivieren
+            self.source_type_var.set("gutenberg_project")
+            self.input_file_entry.delete(0, tk.END)
             
-            # Temporäre Datei erstellen
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.epub')
-            temp_file.close()
-            
-            try:
-                # EPUB in temporäre Datei schreiben
-                ebooklib.epub.write_epub(temp_file.name, book)
-                print(f"EPUB erfolgreich erstellt: {temp_file.name}")
-                
-                # Pfad in das Eingabefeld eintragen
-                self.input_file_entry.delete(0, tk.END)
-                self.input_file_entry.insert(0, temp_file.name)
-                
-                # Status aktualisieren
-                self.status_var.set(translations[self.current_language]['epub_created'])
-            except Exception as e:
-                messagebox.showerror(translations[self.current_language]['error'], 
-                                     f"Fehler beim Erstellen der EPUB-Datei: {str(e)}")
-                if os.path.exists(temp_file.name):
-                    os.unlink(temp_file.name)
-                self.status_var.set("")
+            messagebox.showinfo(
+                translations[self.current_language]['success'],
+                f"{title} ({author}) wurde erfolgreich geladen."
+            )
                 
         except Exception as e:
             messagebox.showerror(translations[self.current_language]['error'], 
                                f"Fehler beim Verarbeiten des Gutenberg-Textes: {str(e)}")
             self.status_var.set("")
+
+    def clean_gutenberg_text(self, text):
+        """Entfernt Lizenz- und Metadaten aus einem Project Gutenberg Text"""
+        start_marker = "*** START OF"
+        end_marker = "*** END OF"
+        
+        print(f"Originaler Text: {len(text)} Zeichen")
+        
+        # Suche nach dem Start-Marker
+        if start_marker in text:
+            start_pos = text.find(start_marker)
+            start_pos = text.find("\n", start_pos) + 1
+            print(f"Start-Marker gefunden an Position: {start_pos}")
+        else:
+            # Wenn kein Start-Marker gefunden wird, versuchen wir andere typische Anfänge zu finden
+            possible_starts = [
+                "Produced by", 
+                "This book was produced",
+                "This eBook was produced",
+                "Transcribed from",
+                "Transcriber's Note",
+                "TRANSCRIBER'S NOTE"
+            ]
+            
+            # Suche nach dem letzten Vorkommen der möglichen Anfänge
+            for marker in possible_starts:
+                pos = text.find(marker)
+                if pos != -1:
+                    # Finde das Ende dieses Abschnitts (nächste Leerzeile)
+                    end_of_note = text.find("\n\n", pos)
+                    if end_of_note != -1:
+                        start_pos = end_of_note + 2  # +2 für die beiden Newlines
+                    else:
+                        start_pos = 0  # Fallback
+                    print(f"Alternativer Start-Marker '{marker}' gefunden, Text beginnt bei Position: {start_pos}")
+                    break
+            else:
+                start_pos = 0  # Wenn kein Marker gefunden wurde
+                print("Kein Start-Marker gefunden, beginne am Anfang")
+            
+        # Suche nach dem End-Marker
+        if end_marker in text:
+            end_pos = text.find(end_marker)
+            print(f"End-Marker gefunden an Position: {end_pos}")
+            
+            # Suche nach Transkriptionsanmerkungen vor dem End-Marker
+            transcription_markers = [
+                "Transcriber's Note", 
+                "TRANSCRIBER'S NOTE",
+                "Transcriber's Notes",
+                "TRANSCRIBER'S NOTES",
+                "Anmerkungen zur Transkription",
+                "ANMERKUNG ZUR TRANSKRIPTION",
+                "ANMERKUNGEN ZUR TRANSKRIPTION"
+            ]
+            
+            for marker in transcription_markers:
+                trans_pos = text.rfind(marker, start_pos, end_pos)
+                if trans_pos != -1:
+                    # Finde den Anfang dieses Abschnitts (vorherige Leerzeile)
+                    start_of_note = text.rfind("\n\n", start_pos, trans_pos)
+                    if start_of_note != -1:
+                        end_pos = start_of_note
+                        print(f"Transkriptionsanmerkung '{marker}' gefunden vor End-Marker, Ende korrigiert zu: {end_pos}")
+                        break
+        else:
+            # Wenn kein End-Marker gefunden wird, suche nach typischen Endabschnitten
+            possible_ends = [
+                "End of Project Gutenberg",
+                "*** END OF THIS PROJECT GUTENBERG",
+                "End of the Project Gutenberg",
+                "Ende dieses Projekt Gutenberg",
+                "Ende des Projekt Gutenberg"
+            ]
+            
+            for marker in possible_ends:
+                pos = text.find(marker)
+                if pos != -1:
+                    end_pos = pos
+                    print(f"Alternativer End-Marker '{marker}' gefunden an Position: {end_pos}")
+                    break
+            else:
+                end_pos = len(text)  # Fallback: Ende des Textes
+                print(f"Kein End-Marker gefunden, Ende auf Textlänge gesetzt: {end_pos}")
+            
+        # Extrahiere den Haupttext
+        if start_pos < end_pos:
+            main_text = text[start_pos:end_pos].strip()
+            print(f"Haupttext extrahiert: {len(main_text)} Zeichen")
+            
+            # Speichere eine Kopie für den Vergleich
+            original_main_text = main_text
+            
+            import re
+            
+            # Spezifische Behandlung für genau dieses Format von Transkriptionsanmerkungen
+            specific_patterns = [
+                (r'Anmerkungen zur Transkription\s*\n+\s*Offensichtliche Fehler wurden stillschweigend korrigert.*?(?:\n\n|\Z)', re.DOTALL),
+                (r'Anmerkungen zur Transkription\s*\n+.*?vorher/nachher.*?(?:\n\n\n|\Z)', re.DOTALL),
+                (r'Transcriber\'s Notes?\s*\n+\s*Obvious.*?errors.*?corrected.*?(?:\n\n|\Z)', re.DOTALL),
+                (r'TRANSCRIBER\'S NOTES?\s*\n+\s*Obvious.*?errors.*?corrected.*?(?:\n\n|\Z)', re.DOTALL)
+            ]
+            
+            for pattern, flags in specific_patterns:
+                cleaned_text = re.sub(pattern, '', main_text, flags=flags)
+                if cleaned_text != main_text:
+                    print(f"Spezifisches Muster für Transkriptionsblock entfernt")
+                    main_text = cleaned_text
+            
+            # Entferne Transkriptionsblöcke mit einem vorsichtigeren Ansatz
+            # Wir identifizieren nur sehr spezifische, klar abgegrenzte Blöcke
+            transcription_starts = [
+                "Transcriber's Note:", 
+                "TRANSCRIBER'S NOTE:",
+                "Transcriber's Notes:",
+                "TRANSCRIBER'S NOTES:",
+                "Anmerkungen zur Transkription:",
+                "ANMERKUNG ZUR TRANSKRIPTION:",
+                "ANMERKUNGEN ZUR TRANSKRIPTION:",
+                "Anmerkungen zur Transkription",
+                "ANMERKUNGEN ZUR TRANSKRIPTION"
+            ]
+            
+            # Prüfen auf Anmerkungen, die mit eckigen Klammern markiert sind
+            # Diese sind oft in der Mitte des Textes
+            bracket_patterns = [
+                r'\[Transcriber.*?\]',
+                r'\[TRANSCRIBER.*?\]',
+                r'\[Anmerkung.*?Transkription.*?\]',
+                r'\[Anmerkungen.*?Transkription.*?\]',
+                r'\(Transcriber.*?\)',
+                r'\(TRANSCRIBER.*?\)',
+                r'\(Anmerkung.*?Transkription.*?\)',
+                r'\(Anmerkungen.*?Transkription.*?\)'
+            ]
+            
+            # Entferne eingebettete Anmerkungen in Klammern
+            for pattern in bracket_patterns:
+                cleaned_text = re.sub(pattern, '', main_text, flags=re.DOTALL)
+                if cleaned_text != main_text:
+                    print(f"Eingebettete Anmerkung mit Pattern '{pattern}' entfernt")
+                main_text = cleaned_text
+            
+            # Entferne Abschnitte mit Korrekturlisten
+            correction_patterns = [
+                r'\[S\. \d+\]:\s*\.\.\. .* \.\.\.\s*\.\.\. .* \.\.\.',
+                r'Seite \d+.*?vorher.*?nachher',
+                r'Page \d+.*?before.*?after'
+            ]
+            
+            for pattern in correction_patterns:
+                cleaned_text = re.sub(pattern, '', main_text, flags=re.DOTALL)
+                if cleaned_text != main_text:
+                    print(f"Korrekturliste mit Pattern '{pattern}' entfernt")
+                main_text = cleaned_text
+            
+            # Suche nach Transkriptionsblöcken am Ende
+            for marker in transcription_starts:
+                last_pos = main_text.rfind(marker)
+                if last_pos != -1:
+                    # Nur entfernen, wenn es nahe am Ende ist (letztes Drittel des Textes)
+                    if last_pos > len(main_text) * 0.66:
+                        # Finde Anfang des Blocks (vorherige Leerzeile)
+                        block_start = main_text.rfind("\n\n", 0, last_pos)
+                        if block_start != -1:
+                            main_text = main_text[:block_start].strip()
+                            print(f"Transkriptionsblock am Ende mit Marker '{marker}' entfernt")
+                            break
+            
+            # Sicherheitsprüfung: Wenn das Ergebnis zu klein ist, verwenden wir den Originaltext
+            if len(main_text) < len(original_main_text) * 0.5:
+                print("WARNUNG: Zu viel Text entfernt, verwende Originaltext mit minimaler Bereinigung")
+                main_text = original_main_text
+                
+                # Entferne nur eindeutig markierte Blöcke mit exakten Markierungen
+                for marker in ["*** START OF", "*** END OF"]:
+                    pos = main_text.find(marker)
+                    if pos != -1:
+                        line_end = main_text.find("\n", pos)
+                        if line_end != -1:
+                            main_text = main_text.replace(main_text[pos:line_end+1], "")
+                            print(f"Nur Marker-Zeile '{marker}' entfernt")
+            
+            print(f"Bereinigter Text: {len(main_text)} Zeichen")
+        else:
+            # Fallback: Verwende den gesamten Text
+            main_text = text
+            print("Warnung: Start-Position >= End-Position, verwende gesamten Text")
+            
+        return main_text
 
     def browse_input_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("EPUB files", "*.epub")])
@@ -908,6 +1172,10 @@ class EpubToAudiobookGUI:
         
         if self.format_var.get():
             options['output_format'] = self.format_var.get()
+            
+        # OpenAI-spezifische Einstellungen
+        if self.tts_provider_var.get() == "openai" and self.model_var.get():
+            options['model_name'] = self.model_var.get()
 
         # Filtere None und leere Strings
         return {k: v for k, v in options.items() if v not in (None, "")}
@@ -973,7 +1241,7 @@ Möchten Sie mit der Konvertierung fortfahren?
             return False
         return True
 
-    def run_conversion(self, options):
+    def run_conversion(self, options, use_gutenberg=False):
         """Führt die Konvertierung durch"""
         try:
             if not self.validate_api_keys(options.get('tts')):
@@ -981,6 +1249,23 @@ Möchten Sie mit der Konvertierung fortfahren?
 
             if 'tts' in options:
                 options['tts'] = options.pop('tts')
+            
+            # Wenn Gutenberg-Text verwendet wird, erstelle eine temporäre Textdatei
+            temp_text_file = None
+            if use_gutenberg and self.gutenberg_text:
+                # Erstelle eine temporäre Textdatei
+                temp_text_file = tempfile.NamedTemporaryFile(delete=False, suffix='.txt', mode='w', encoding='utf-8')
+                temp_text_file.write(f"# {self.gutenberg_text['title']}\n\n")
+                temp_text_file.write(f"## by {self.gutenberg_text['author']}\n\n")
+                temp_text_file.write(self.gutenberg_text['text'])
+                temp_text_file.close()
+                
+                # Setze den Pfad als input_file
+                options['input_file'] = temp_text_file.name
+                # Setze Text-Modus für die Verarbeitung
+                options['text_mode'] = True
+                
+                print(f"Temporäre Textdatei erstellt: {temp_text_file.name}")
 
             Args = namedtuple('Args', options.keys())
             args = Args(**options)
@@ -998,12 +1283,15 @@ Möchten Sie mit der Konvertierung fortfahren?
                 tts_provider_instance = AzureTTSProvider(
                     general_config,
                     args.voice_name,
-                    args.break_duration,
+                    args.break_duration if hasattr(args, 'break_duration') else None,
                     args.output_format,
                 )
             elif args.tts == TTS_OPENAI:
                 tts_provider_instance = OpenAITTSProvider(
-                    general_config, args.model_name, args.voice_name, args.output_format
+                    general_config, 
+                    args.model_name if hasattr(args, 'model_name') else None, 
+                    args.voice_name, 
+                    args.output_format
                 )
             else:
                 raise ValueError(f"Ungültiger TTS-Provider: {args.tts}")
@@ -1014,6 +1302,14 @@ Möchten Sie mit der Konvertierung fortfahren?
             logging.error(f"Fehler bei der Konvertierung: {e}")
             messagebox.showerror("Fehler", f"Ein Fehler ist aufgetreten: {e}")
         finally:
+            # Temporäre Datei aufräumen
+            if temp_text_file and os.path.exists(temp_text_file.name):
+                try:
+                    os.unlink(temp_text_file.name)
+                    print(f"Temporäre Datei gelöscht: {temp_text_file.name}")
+                except Exception as e:
+                    print(f"Fehler beim Löschen der temporären Datei: {e}")
+                    
             self.is_converting = False
             self.start_button.config(state=tk.NORMAL)
 
@@ -1026,45 +1322,58 @@ Möchten Sie mit der Konvertierung fortfahren?
         self.start_button.config(state=tk.DISABLED)
         self.is_converting = True
         options = self.get_options()
-
+        
+        # Überprüfe, ob Gutenberg-Text oder lokale Datei verwendet wird
+        use_gutenberg = self.source_type_var.get() == "gutenberg_project" and self.gutenberg_text is not None
+        
         # Überprüfe erforderliche Felder
-        if not options.get('input_file') or not options.get('output_folder'):
+        if not use_gutenberg and (not options.get('input_file') or not options.get('output_folder')):
             messagebox.showerror("Fehler", "Bitte geben Sie sowohl die Eingabedatei als auch den Ausgabepfad an.")
             self.start_button.config(state=tk.NORMAL)
             self.is_converting = False
             return
-
-        # Überprüfe Datei
-        if not self.validate_file(options['input_file']):
+        
+        if not options.get('output_folder'):
+            messagebox.showerror("Fehler", "Bitte geben Sie einen Ausgabepfad an.")
             self.start_button.config(state=tk.NORMAL)
             self.is_converting = False
             return
 
-        # Lese die EPUB-Datei und schätze die Kosten
-        try:
-            book = epub.read_epub(options['input_file'])
-            total_chars = 0
-            for item in book.get_items():
-                if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                    content = item.get_content()
-                    soup = BeautifulSoup(content, "xml")
-                    text = soup.get_text()
-                    total_chars += len(text)
-
-            # Zeige Kostenschätzung
-            if not self.show_cost_estimation(total_chars):
+        # Wenn keine Gutenberg-Quelle, dann überprüfe die Datei
+        if not use_gutenberg:
+            # Überprüfe Datei
+            if not self.validate_file(options['input_file']):
                 self.start_button.config(state=tk.NORMAL)
                 self.is_converting = False
                 return
 
-        except Exception as e:
-            messagebox.showerror("Fehler", f"Fehler beim Lesen der EPUB-Datei: {e}")
+            # Lese die EPUB-Datei und schätze die Kosten
+            try:
+                book = epub.read_epub(options['input_file'])
+                total_chars = 0
+                for item in book.get_items():
+                    if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                        content = item.get_content()
+                        soup = BeautifulSoup(content, "xml")
+                        text = soup.get_text()
+                        total_chars += len(text)
+            except Exception as e:
+                messagebox.showerror("Fehler", f"Fehler beim Lesen der EPUB-Datei: {e}")
+                self.start_button.config(state=tk.NORMAL)
+                self.is_converting = False
+                return
+        else:
+            # Berechne die Textlänge aus dem Gutenberg-Text
+            total_chars = len(self.gutenberg_text['text'])
+
+        # Zeige Kostenschätzung
+        if not self.show_cost_estimation(total_chars):
             self.start_button.config(state=tk.NORMAL)
             self.is_converting = False
             return
 
         # Starte die Konversion
-        self.conversion_thread = threading.Thread(target=self.run_conversion, args=(options,))
+        self.conversion_thread = threading.Thread(target=self.run_conversion, args=(options, use_gutenberg))
         self.conversion_thread.daemon = True
         self.conversion_thread.start()
 
@@ -1073,9 +1382,9 @@ Möchten Sie mit der Konvertierung fortfahren?
         if self.is_converting and self.conversion_thread and self.conversion_thread.is_alive():
             if messagebox.askyesno("Bestätigung", "Möchten Sie die Konvertierung wirklich abbrechen?"):
                 self.is_converting = False
-                self.conversion_thread.join(0)
-                self.start_button.config(state=tk.NORMAL)
-                messagebox.showinfo("Abgebrochen", "Konvertierung erfolgreich abgebrochen")
+            self.conversion_thread.join(0)
+            self.start_button.config(state=tk.NORMAL)
+            messagebox.showinfo("Abgebrochen", "Konvertierung erfolgreich abgebrochen")
 
     def show_usage(self):
         """Zeigt Hilfe-Informationen zur Verwendung des Tools an"""
@@ -1138,12 +1447,13 @@ Möchten Sie mit der Konvertierung fortfahren?
             "ui_language": self.current_language,
             "source_type": self.source_type_var.get(),
             "input_file": self.input_file_entry.get(),
-            "gutenberg_id": self.gutenberg_id_entry.get(),
+            "gutenberg_id": self.gutenberg_id_entry.get() if hasattr(self, 'gutenberg_id_entry') else "",
             "output_folder": self.output_folder_entry.get(),
             "tts_provider": self.tts_provider_var.get(),
             "tts_language": self.tts_language_var.get(),
             "voice_name": self.voice_var.get(),
             "output_format": self.format_var.get(),
+            "model_name": self.model_var.get(),  # OpenAI Modell
             "log_level": self.log_var.get(),
             "preview": self.preview_var.get(),
             "newline_mode": self.newline_var.get(),
@@ -1175,12 +1485,14 @@ Möchten Sie mit der Konvertierung fortfahren?
                 self.on_source_type_change()
                 
                 self.input_file_entry.insert(0, settings.get("input_file", ""))
-                self.gutenberg_id_entry.insert(0, settings.get("gutenberg_id", ""))
+                if hasattr(self, 'gutenberg_id_entry'):
+                    self.gutenberg_id_entry.insert(0, settings.get("gutenberg_id", ""))
                 self.output_folder_entry.insert(0, settings.get("output_folder", ""))
                 self.tts_provider_var.set(settings.get("tts_provider", TTS_AZURE))
                 self.tts_language_var.set(settings.get("tts_language", "de-DE"))
                 self.voice_var.set(settings.get("voice_name", ""))
                 self.format_var.set(settings.get("output_format", "mp3"))
+                self.model_var.set(settings.get("model_name", "tts-1"))  # OpenAI Modell
                 self.log_var.set(settings.get("log_level", "INFO"))
                 self.preview_var.set(settings.get("preview", False))
                 self.newline_var.set(settings.get("newline_mode", "double"))
@@ -1191,6 +1503,9 @@ Möchten Sie mit der Konvertierung fortfahren?
                 self.azure_key_entry.insert(0, settings.get("azure_key", ""))
                 self.azure_region_entry.insert(0, settings.get("azure_region", ""))
                 self.openai_key_entry.insert(0, settings.get("openai_key", ""))
+                
+                # Provider-Einstellungen aktualisieren
+                self.on_provider_change()
 
     def load_gui_settings(self):
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
