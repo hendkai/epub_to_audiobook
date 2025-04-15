@@ -1250,6 +1250,22 @@ Möchten Sie mit der Konvertierung fortfahren?
             if 'tts' in options:
                 options['tts'] = options.pop('tts')
             
+            # Entferne Proxy-Konfiguration, falls vorhanden, um Probleme mit dem OpenAI-Client zu vermeiden
+            if 'proxy' in options:
+                options.pop('proxy')
+            
+            # Definiere eine explizite Liste erlaubter Parameter
+            # Dies verhindert, dass unbekannte Parameter weitergegeben werden
+            allowed_params = [
+                'input_file', 'output_folder', 'tts', 'one_file', 'preview', 
+                'output_text', 'remove_endnotes', 'log', 'newline_mode', 
+                'title_mode', 'language', 'voice_name', 'output_format', 
+                'model_name', 'break_duration', 'text_mode'
+            ]
+            
+            # Filtere Optionen, so dass nur erlaubte Parameter übrigbleiben
+            filtered_options = {k: v for k, v in options.items() if k in allowed_params}
+                
             # Wenn Gutenberg-Text verwendet wird, erstelle eine temporäre Textdatei
             temp_text_file = None
             if use_gutenberg and self.gutenberg_text:
@@ -1261,14 +1277,14 @@ Möchten Sie mit der Konvertierung fortfahren?
                 temp_text_file.close()
                 
                 # Setze den Pfad als input_file
-                options['input_file'] = temp_text_file.name
+                filtered_options['input_file'] = temp_text_file.name
                 # Setze Text-Modus für die Verarbeitung
-                options['text_mode'] = True
+                filtered_options['text_mode'] = True
                 
                 print(f"Temporäre Textdatei erstellt: {temp_text_file.name}")
 
-            Args = namedtuple('Args', options.keys())
-            args = Args(**options)
+            Args = namedtuple('Args', filtered_options.keys())
+            args = Args(**filtered_options)
 
             # Setze die entsprechenden Umgebungsvariablen
             if args.tts == TTS_AZURE:
@@ -1276,6 +1292,16 @@ Möchten Sie mit der Konvertierung fortfahren?
                 os.environ["MS_TTS_REGION"] = self.azure_region_entry.get()
             elif args.tts == TTS_OPENAI:
                 os.environ["OPENAI_API_KEY"] = self.openai_key_entry.get()
+                
+                # Proxy-Umgebungsvariablen temporär entfernen, um Fehler zu vermeiden
+                proxy_vars = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "OPENAI_PROXY"]
+                saved_vars = {}
+                
+                # Sichern und Entfernen der Proxy-Variablen
+                for var in proxy_vars:
+                    if var in os.environ:
+                        saved_vars[var] = os.environ[var]
+                        del os.environ[var]
 
             general_config = GeneralConfig(args)
 
@@ -1287,9 +1313,11 @@ Möchten Sie mit der Konvertierung fortfahren?
                     args.output_format,
                 )
             elif args.tts == TTS_OPENAI:
+                # Erstelle den OpenAI-Provider mit den richtigen Parametern
+                model_name = args.model_name if hasattr(args, 'model_name') else "tts-1"
                 tts_provider_instance = OpenAITTSProvider(
                     general_config, 
-                    args.model_name if hasattr(args, 'model_name') else None, 
+                    model_name, 
                     args.voice_name, 
                     args.output_format
                 )
@@ -1309,6 +1337,11 @@ Möchten Sie mit der Konvertierung fortfahren?
                     print(f"Temporäre Datei gelöscht: {temp_text_file.name}")
                 except Exception as e:
                     print(f"Fehler beim Löschen der temporären Datei: {e}")
+            
+            # Proxy-Umgebungsvariablen wiederherstellen
+            if 'saved_vars' in locals() and args.tts == TTS_OPENAI:
+                for var, value in saved_vars.items():
+                    os.environ[var] = value
                     
             self.is_converting = False
             self.start_button.config(state=tk.NORMAL)

@@ -16,7 +16,6 @@ from mutagen.id3._frames import TIT2, TPE1, TALB, TRCK
 import logging
 from time import sleep
 import dataclasses
-from openai import OpenAI
 from tqdm import tqdm
 import time
 import configparser
@@ -93,6 +92,7 @@ class GeneralConfig:
         self.voice_name = getattr(args, 'voice_name', None)
         self.model_name = getattr(args, 'model_name', None)
         self.break_duration = getattr(args, 'break_duration', None)
+        self.text_mode = getattr(args, 'text_mode', False)
         
         # Logging setup
         log_level = getattr(args, 'log', 'INFO')
@@ -268,10 +268,17 @@ class AzureTTSProvider(TTSProvider):
 class OpenAITTSProvider(TTSProvider):
     def __init__(self, general_config: GeneralConfig, model, voice, format):
         super().__init__(general_config)
-        self.model = model
+        self.model = model or "tts-1"
         self.voice = voice
         self.format = format
-        self.client = OpenAI()  # User should set OPENAI_API_KEY environment variable
+        self.api_key = os.environ.get("OPENAI_API_KEY")
+        
+        if not self.api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is not set. Please set it before using OpenAI TTS.")
+        
+        # Wir verwenden keinen OpenAI-Client mehr, sondern direkte API-Aufrufe
+        # Dies verhindert das Problem mit dem 'proxies' Parameter
+        self.api_url = "https://api.openai.com/v1/audio/speech"
 
     def __str__(self) -> str:
         return (
@@ -301,14 +308,37 @@ class OpenAITTSProvider(TTSProvider):
 
             logger.debug(f"Text: [{chunk}], length={len(chunk)}")
 
-            # NO retry for OpenAI TTS because SDK has built-in retry logic
-            response = self.client.audio.speech.create(
-                model=self.model,
-                voice=self.voice,
-                input=chunk,
-                response_format=self.format,
-            )
-            audio_segments.append(io.BytesIO(response.content))
+            # Direkte API-Anfrage anstelle des OpenAI SDK
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": self.model,
+                "voice": self.voice,
+                "input": chunk,
+                "response_format": self.format
+            }
+            
+            for attempt in range(3):
+                try:
+                    response = requests.post(
+                        self.api_url, 
+                        headers=headers, 
+                        json=payload,
+                        timeout=60
+                    )
+                    response.raise_for_status()
+                    # Bei direkter API-Anfrage ist das Audio direkt in der Antwort
+                    audio_segments.append(io.BytesIO(response.content))
+                    break
+                except Exception as e:
+                    if attempt == 2:  # Letzter Versuch
+                        logger.error(f"Fehler bei OpenAI TTS API-Anfrage: {e}")
+                        raise
+                    logger.warning(f"Fehler bei OpenAI TTS API-Anfrage (Versuch {attempt+1}/3): {e}")
+                    sleep(2 ** attempt)  # Exponentielles Backoff
 
         with open(output_file, "wb") as outfile:
             for segment in audio_segments:
@@ -511,21 +541,74 @@ def epub_to_audiobook(tts_provider: TTSProvider):
     output_text = tts_provider.general_config.output_text
     remove_endnotes = tts_provider.general_config.remove_endnotes
     one_file = tts_provider.general_config.one_file
+    text_mode = getattr(tts_provider.general_config, 'text_mode', False)
 
     logger.info(f"Converting {input_file} to audiobook with config: {tts_provider}")
 
     # Create output folder if it doesn't exist
     os.makedirs(output_folder, exist_ok=True)
 
-    # Read epub file
-    book = epub.read_epub(input_file)
+    # Verarbeitung je nach Dateityp
+    if text_mode:
+        # Direktes Lesen der Textdatei
+        logger.info("Text-Modus: Lese Textdatei direkt")
+        
+        try:
+            with open(input_file, 'r', encoding='utf-8') as f:
+                text_content = f.read()
+                
+            # Extrahiere Titel und Autor aus dem Text (falls vorhanden)
+            title_match = re.search(r'#\s*(.*?)\s*\n', text_content)
+            book_title = title_match.group(1) if title_match else os.path.basename(input_file)
+            
+            author_match = re.search(r'##\s*by\s*(.*?)\s*\n', text_content)
+            author = author_match.group(1) if author_match else "Unknown"
+            
+            # Teile Text in Kapitel auf
+            chapters = []
+            
+            if "\n## " in text_content:
+                # Markdown-Struktur erkannt - nach Überschriften aufteilen
+                chapter_parts = re.split(r'\n##\s+', text_content)
+                
+                # Erstes Element ist die Einleitung
+                intro = process_text(chapter_parts[0], newline_mode, remove_endnotes)
+                chapters.append(("Introduction", intro))
+                
+                # Weitere Kapitel
+                for i, part in enumerate(chapter_parts[1:], 1):
+                    if part.strip():
+                        title_end = part.find('\n')
+                        if title_end > 0:
+                            title = part[:title_end].strip()
+                            content = part[title_end:].strip()
+                        else:
+                            title = f"Chapter {i}"
+                            content = part.strip()
+                        
+                        # Verarbeite den Inhalt entsprechend den definierten Regeln
+                        processed_content = process_text(content, newline_mode, remove_endnotes)
+                        chapters.append((title, processed_content))
+            else:
+                # Keine Kapitelstruktur erkannt - als ein einziges Kapitel behandeln
+                processed_content = process_text(text_content, newline_mode, remove_endnotes)
+                chapters = [(book_title, processed_content)]
+        
+        except Exception as e:
+            logger.error(f"Fehler beim Lesen der Textdatei: {e}")
+            raise
+    else:
+        # Standard EPUB-Verarbeitung
+        # Read epub file
+        book = epub.read_epub(input_file)
 
-    # Get book title and author
-    book_title = book.get_metadata('DC', 'title')[0][0]
-    author = book.get_metadata('DC', 'creator')[0][0]
+        # Get book title and author
+        book_title = book.get_metadata('DC', 'title')[0][0]
+        author = book.get_metadata('DC', 'creator')[0][0]
 
-    # Extract chapters
-    chapters = extract_chapters(book, newline_mode, remove_endnotes)
+        # Extract chapters
+        chapters = extract_chapters(book, newline_mode, remove_endnotes)
+    
     total_chapters = len(chapters)
 
     if chapter_end == -1:
@@ -727,6 +810,11 @@ def main():
         help="Enable Output Text. This will export a plain text file for each chapter specified and write the files to the output folder specified.",
     )
     parser.add_argument(
+        "--text_mode",
+        action="store_true",
+        help="Behandle die Eingabedatei als reine Textdatei anstatt als EPUB. Nützlich für Textkonvertierung oder Project Gutenberg-Texte."
+    )
+    parser.add_argument(
         "--remove_endnotes",
         action="store_true",
         help="This will remove endnote numbers from the end or middle of sentences. This is useful for academic books.",
@@ -789,6 +877,9 @@ def main():
     # Überprüfen Sie, ob die Eingabedatei und der Ausgabepfad angegeben sind
     if not args.input_file or not args.output_folder:
         parser.error("Die Eingabedatei und der Ausgabepfad sind erforderlich.")
+    
+    # GeneralConfig-Instanz aus den Kommandozeilenargumenten erstellen
+    general_config = GeneralConfig(args)
 
     if args.tts == TTS_AZURE:
         tts_provider = AzureTTSProvider(
@@ -799,7 +890,7 @@ def main():
         )
     elif args.tts == TTS_OPENAI:
         tts_provider = OpenAITTSProvider(
-            general_config, args.openai_model, args.openai_voice, args.openai_format
+            general_config, args.model_name, args.voice_name, args.output_format
         )
     else:
         raise ValueError(f"Invalid TTS provider: {args.tts}")
@@ -837,3 +928,34 @@ if __name__ == "__main__":
             import tkinter.messagebox as messagebox
             messagebox.showerror("Error", str(e))
         sys.exit(1)
+
+def process_text(text: str, newline_mode: str, remove_endnotes: bool) -> str:
+    """Verarbeitet Text im Text-Modus mit ähnlichen Regeln wie bei EPUB-Dateien"""
+    # Erste Bereinigung: Entferne übermäßige Leerzeichen und Zeilenumbrüche
+    cleaned_text = text.strip()
+    
+    # Ersetze Zeilenumbrüche basierend auf dem Modus
+    if newline_mode == "single":
+        cleaned_text = re.sub(r"[\n]+", " " + MAGIC_BREAK_STRING + " ", cleaned_text)
+    elif newline_mode == "double":
+        cleaned_text = re.sub(r"[\n]{2,}", " " + MAGIC_BREAK_STRING + " ", cleaned_text)
+    elif newline_mode is None or newline_mode == "none":
+        cleaned_text = re.sub(r"\n", " ", cleaned_text)
+    else:
+        raise ValueError(f"Ungültiger newline mode: {newline_mode}")
+
+    # Normalisiere Leerzeichen
+    cleaned_text = re.sub(r"\s+", " ", cleaned_text)
+    
+    # Stelle sicher, dass vor und nach MAGIC_BREAK_STRING Leerzeichen sind
+    cleaned_text = cleaned_text.replace(MAGIC_BREAK_STRING, " " + MAGIC_BREAK_STRING + " ")
+    cleaned_text = re.sub(r"\s+", " ", cleaned_text)  # Entferne doppelte Leerzeichen
+    
+    # Entferne Leerzeichen vor Satzzeichen
+    cleaned_text = re.sub(r'\s+([.,!?])', r'\1', cleaned_text)
+
+    # Removes endnote numbers wenn aktiviert
+    if remove_endnotes:
+        cleaned_text = re.sub(r'(?<=[a-zA-Z.,!?;"])\d+', "", cleaned_text)
+        
+    return cleaned_text
