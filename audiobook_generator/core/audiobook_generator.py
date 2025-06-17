@@ -1,6 +1,8 @@
 import logging
 import multiprocessing
 import os
+import glob
+from pydub import AudioSegment
 
 from audiobook_generator.book_parsers.base_book_parser import get_book_parser
 from audiobook_generator.config.general_config import GeneralConfig
@@ -70,6 +72,70 @@ class AudiobookGenerator:
         """Wrapper for process_chapter to handle unpacking args for imap."""
         idx, title, text, book_parser = args
         return idx, self.process_chapter(idx, title, text, book_parser)
+
+    def _combine_audio_files(self, book_parser, tts_provider):
+        """Combine all audio files into a single file."""
+        try:
+            logger.info("Combining audio files into single output file...")
+            
+            # Get file extension
+            file_extension = tts_provider.get_output_file_extension()
+            
+            # Find all audio files in output directory
+            audio_files = glob.glob(os.path.join(self.config.output_folder, f"*.{file_extension}"))
+            audio_files.sort()  # Sort to maintain chapter order
+            
+            if not audio_files:
+                logger.warning("No audio files found to combine")
+                return
+            
+            # Load and combine audio files
+            combined_audio = AudioSegment.empty()
+            
+            for audio_file in audio_files:
+                logger.info(f"Adding {os.path.basename(audio_file)} to combined file")
+                audio_segment = AudioSegment.from_file(audio_file)
+                combined_audio += audio_segment
+                
+                # Add a small pause between chapters (1 second)
+                combined_audio += AudioSegment.silent(duration=1000)
+            
+            # Create output filename
+            book_title = book_parser.get_book_title().replace(" ", "_").replace("/", "_")
+            output_filename = f"{book_title}_complete.{file_extension}"
+            output_path = os.path.join(self.config.output_folder, output_filename)
+            
+            # Export combined audio
+            logger.info(f"Exporting combined audio to: {output_filename}")
+            combined_audio.export(output_path, format=file_extension.lower())
+            
+            # Set audio tags for the combined file
+            audio_tags = AudioTags(
+                book_parser.get_book_title(),
+                book_parser.get_book_author(),
+                book_parser.get_book_title(),
+                1
+            )
+            
+            # Apply tags if supported
+            try:
+                import eyed3
+                audiofile = eyed3.load(output_path)
+                if audiofile and audiofile.tag:
+                    audiofile.tag.title = audio_tags.title
+                    audiofile.tag.artist = audio_tags.author
+                    audiofile.tag.album = audio_tags.series_title
+                    audiofile.tag.track_num = audio_tags.part_number
+                    audiofile.tag.save()
+            except ImportError:
+                logger.warning("eyed3 not available, skipping ID3 tags for combined file")
+            except Exception as e:
+                logger.warning(f"Could not set audio tags: {e}")
+            
+            logger.info(f"✅ Combined audio file created: {output_filename}")
+            
+        except Exception as e:
+            logger.exception(f"Error combining audio files: {e}")
 
     def run(self):
         try:
@@ -154,6 +220,10 @@ class AudiobookGenerator:
                 logger.info(f"Conversion completed with {len(failed_chapters)} failed chapters. Check your output directory: {self.config.output_folder} and log file: {self.config.log_file} for more details.")
             else:
                 logger.info(f"All chapters converted successfully. Check your output directory: {self.config.output_folder}")
+
+            # Handle one-file output if requested
+            if self.config.one_file_output and not self.config.preview:
+                self._combine_audio_files(book_parser, tts_provider)
 
         except KeyboardInterrupt:
             logger.info("Audiobook generation process interrupted by user (Ctrl+C).")

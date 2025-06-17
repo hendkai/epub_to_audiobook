@@ -38,6 +38,11 @@ Du hast erfolgreich **alle deine wertvollen Features** aus deinem alten Fork in 
 python enhanced_gui.py
 ```
 
+### **Erweiterte WebUI (mit allen Features):**
+```bash
+python main_enhanced_ui.py
+```
+
 ### **Original WebUI (mit neuen Utils):**
 ```bash
 python main_ui.py
@@ -104,11 +109,12 @@ title = i18n.t("title")  # "EPUB zu Audiobook Konverter"
 
 ### **Was du jetzt machen kannst:**
 
-- **📱 GUI testen**: `python enhanced_gui.py`
-- **🌐 WebUI verwenden**: `python main_ui.py` 
+- **📱 Desktop GUI testen**: `python enhanced_gui.py`
+- **🌐 Erweiterte WebUI**: `python main_enhanced_ui.py` - **ALLE Features in der WebUI!**
 - **📚 Gutenberg durchsuchen**: Neue Bücher von Project Gutenberg laden
 - **💰 Kosten kalkulieren**: Vor der Konvertierung Preise prüfen
 - **🇩🇪 Auf Deutsch nutzen**: Vollständig lokalisierte Oberfläche
+- **💿 Ein-Datei-Ausgabe**: Alle Kapitel in einer MP3-Datei kombinieren
 
 ## 🏆 Erfolg!
 

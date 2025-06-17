@@ -7,7 +7,7 @@ import threading
 import time
 
 import gradio as gr
-from gradio_log import Log
+# from gradio_log import Log  # Disabled due to compatibility issues
 
 from audiobook_generator.config.general_config import GeneralConfig
 from audiobook_generator.tts_providers.azure_tts_provider import get_azure_supported_languages, \
@@ -136,42 +136,129 @@ def load_gutenberg_book(book_id: str) -> Tuple[str, str, str]:
     except Exception as e:
         return "", "", f"{i18n.t('gutenberg_error')}: {str(e)}"
 
+def load_selected_book_from_results(search_results_data) -> Tuple[str, str, str]:
+    """Load a book selected from search results"""
+    try:
+        if search_results_data is None or search_results_data.empty:
+            return "", "", i18n.t("no_book_selected")
+        
+        # Use the first row from the dataframe
+        if len(search_results_data) == 0:
+            return "", "", i18n.t("no_book_selected")
+        
+        # Get the first row as a pandas Series
+        first_row = search_results_data.iloc[0]
+        
+        if len(first_row) < 1:
+            return "", "", i18n.t("no_book_selected")
+        
+        book_id = str(first_row.iloc[0])  # First column is ID
+        
+        # Load the book using the existing function
+        epub_path, preview, status = load_gutenberg_book(book_id)
+        
+        return epub_path, preview, status
+        
+    except Exception as e:
+        return "", "", f"{i18n.t('error')}: {str(e)}"
+
 def estimate_conversion_costs(file_path: str = None, text: str = None) -> str:
-    """Estimate TTS conversion costs"""
+    """Estimate TTS conversion costs for the entire book"""
     try:
         if not file_path and not text:
-            return i18n.t("no_text_loaded")
+            return f'<div style="color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 5px; border: 1px solid #f5c6cb;">{i18n.t("no_text_loaded")}</div>'
         
-        # Calculate text length
-        if text:
+        # Always analyze the entire book from file, not just preview text
+        text_length = 0
+        
+        if file_path and os.path.exists(file_path):
+            try:
+                from audiobook_generator.book_parsers.epub_book_parser import EpubBookParser
+                from audiobook_generator.config.general_config import GeneralConfig
+                
+                # Create a minimal config for parsing
+                class DummyArgs:
+                    def __init__(self):
+                        self.input_file = file_path
+                        self.title_mode = "auto"
+                        self.newline_mode = "double"
+                        self.chapter_start = 1
+                        self.chapter_end = -1
+                        self.remove_endnotes = False
+                        self.remove_reference_numbers = False
+                        self.search_and_replace_file = None
+                
+                config = GeneralConfig(DummyArgs())
+                parser = EpubBookParser(config)
+                
+                # Get ALL chapters and calculate total length (not just preview)
+                chapters = parser.get_chapters("")
+                text_length = sum(len(chapter_text) for title, chapter_text in chapters)
+                
+                print(f"📊 Cost estimation: Found {len(chapters)} chapters, total {text_length:,} characters")
+                
+            except Exception as e:
+                print(f"❌ Error parsing book: {e}")
+                # Fallback: try to estimate from file size
+                try:
+                    file_size = os.path.getsize(file_path)
+                    # Rough estimate: EPUB files are compressed, so multiply by factor
+                    text_length = int(file_size * 2.5)
+                except:
+                    text_length = 100000  # Conservative fallback
+        elif text:
+            # If only preview text is provided, warn user
             text_length = len(text)
         else:
-            # For EPUB files, we'd need to extract text first
-            # This is a simplified approach
-            text_length = 50000  # Estimate
+            text_length = 100000  # Default estimate
         
         # Get cost comparison
         comparison = cost_calculator.get_cost_comparison(text_length)
         
-        # Format results
-        result_lines = [f"**{i18n.t('cost_estimation')}**\n"]
-        result_lines.append(f"{i18n.t('text_length')}: {text_length:,} {i18n.t('characters')}\n")
+        # Format results as HTML with better contrast and styling
+        html_content = f"""
+        <div style="color: #212529 !important; background: #ffffff !important; padding: 20px; border-radius: 8px; border: 2px solid #007bff; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <h3 style="color: #007bff !important; margin-top: 0; margin-bottom: 15px; font-size: 1.25rem; font-weight: bold;">{i18n.t('cost_estimation')}</h3>
+            <div style="color: #495057 !important; margin-bottom: 20px; padding: 10px; background: #e9ecef; border-radius: 5px; font-weight: 600; font-size: 1.1rem;">
+                {i18n.t('text_length')}: {text_length:,} {i18n.t('characters')}
+            </div>
+            <div style="line-height: 1.8;">
+        """
         
         for provider_key, cost_info in comparison.items():
             formatted_cost = cost_calculator.format_cost_info(cost_info)
-            result_lines.append(formatted_cost)
+            # Convert markdown-style formatting to HTML and ensure visibility
+            formatted_cost = formatted_cost.replace("💰", "💰").replace("**", "")
+            html_content += f'<div style="color: #212529 !important; margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-left: 4px solid #007bff; font-family: monospace; font-size: 0.95rem;">{formatted_cost}</div>'
+        
+        # Add cost explanation
+        html_content += f"""
+            </div>
+            <div style="margin-top: 15px; padding: 12px; background: #fff3cd !important; border: 1px solid #ffc107 !important; border-radius: 5px; color: #856404 !important; font-size: 0.9rem;">
+                <strong>ℹ️ Kostenhinweis:</strong><br>
+                • OpenAI TTS-1/HD sind Premium-Services mit hoher Qualität<br>
+                • Edge TTS und Piper sind kostenlose Alternativen<br>
+                • Für ein ganzes Buch (~80.000 Zeichen) sind $1-2 realistisch
+            </div>
+        """
         
         # Add cheapest option
         cheapest_key, cheapest_info = cost_calculator.get_cheapest_option(text_length)
-        result_lines.append(f"\n**{i18n.t('cheapest_option')}:** {cheapest_key}")
+        html_content += f"""
+            <div style="margin-top: 10px; padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; font-weight: bold; color: #155724 !important; font-size: 1.1rem;">
+                🏆 {i18n.t('cheapest_option')}: {cheapest_key}
+            </div>
+        </div>
+        """
         
-        return "\n".join(result_lines)
+        return html_content
         
     except Exception as e:
-        return f"{i18n.t('error')}: {str(e)}"
+        error_msg = f"{i18n.t('error')}: {str(e)}"
+        return f'<div style="color: #721c24 !important; background: #f8d7da; padding: 15px; border-radius: 5px; border: 1px solid #f5c6cb;">{error_msg}</div>'
 
 def show_text_preview(file_path: str = None) -> str:
-    """Show text preview"""
+    """Show limited text preview"""
     global current_text_preview
     
     if current_text_preview:
@@ -179,12 +266,110 @@ def show_text_preview(file_path: str = None) -> str:
     
     if file_path and os.path.exists(file_path):
         try:
-            # This would need proper EPUB parsing
-            return "Preview will be available after implementing EPUB text extraction"
+            from audiobook_generator.book_parsers.epub_book_parser import EpubBookParser
+            from audiobook_generator.config.general_config import GeneralConfig
+            
+            # Create a minimal config for parsing
+            class DummyArgs:
+                def __init__(self):
+                    self.input_file = file_path
+                    self.title_mode = "auto"
+                    self.newline_mode = "double"
+                    self.chapter_start = 1
+                    self.chapter_end = -1
+                    self.remove_endnotes = False
+                    self.remove_reference_numbers = False
+                    self.search_and_replace_file = None
+            
+            config = GeneralConfig(DummyArgs())
+            parser = EpubBookParser(config)
+            
+            # Get first few chapters for preview
+            chapters = parser.get_chapters("")
+            if chapters:
+                preview_text = ""
+                for i, (title, text) in enumerate(chapters[:3]):  # First 3 chapters
+                    preview_text += f"**{title}**\n\n"
+                    preview_text += text[:500] + ("..." if len(text) > 500 else "") + "\n\n"
+                    if len(preview_text) > 1500:
+                        break
+                
+                current_text_preview = preview_text
+                return preview_text
+            else:
+                return i18n.t("no_text_loaded")
+                
         except Exception as e:
             return f"{i18n.t('error')}: {str(e)}"
     
     return i18n.t("no_text_loaded")
+
+def show_full_text_preview(file_path: str = None) -> str:
+    """Show complete book text in popup"""
+    if not file_path or not os.path.exists(file_path):
+        return f'<div style="color: #dc3545; padding: 20px; text-align: center; font-size: 1.1rem;">{i18n.t("no_text_loaded")}</div>'
+    
+    try:
+        from audiobook_generator.book_parsers.epub_book_parser import EpubBookParser
+        from audiobook_generator.config.general_config import GeneralConfig
+        
+        # Create a minimal config for parsing
+        class DummyArgs:
+            def __init__(self):
+                self.input_file = file_path
+                self.title_mode = "auto"
+                self.newline_mode = "double"
+                self.chapter_start = 1
+                self.chapter_end = -1
+                self.remove_endnotes = False
+                self.remove_reference_numbers = False
+                self.search_and_replace_file = None
+        
+        config = GeneralConfig(DummyArgs())
+        parser = EpubBookParser(config)
+        
+        # Get ALL chapters for full preview
+        chapters = parser.get_chapters("")
+        if chapters:
+            full_text = f"""
+            <div style="max-height: 80vh !important; overflow-y: auto !important; padding: 20px !important; background: #ffffff !important; border-radius: 8px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important; color: #212529 !important;">
+                <h2 style="color: #007bff !important; margin-bottom: 20px !important; text-align: center !important; font-size: 1.5rem !important;">📖 {i18n.t('full_text_preview')}</h2>
+                <div style="line-height: 1.6 !important; font-family: 'Georgia', serif !important; color: #212529 !important;">
+            """
+            
+            total_chars = 0
+            for i, (title, text) in enumerate(chapters):
+                # Escape HTML in text content and preserve formatting
+                escaped_text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                formatted_text = escaped_text.replace('\n\n', '</p><p style="margin: 15px 0 !important; color: #212529 !important;">').replace('\n', '<br>')
+                
+                full_text += f"""
+                <div style="margin-bottom: 30px !important; page-break-inside: avoid !important;">
+                    <h3 style="color: #495057 !important; border-bottom: 2px solid #007bff !important; padding-bottom: 10px !important; margin-bottom: 15px !important; font-size: 1.25rem !important;">
+                        {title}
+                    </h3>
+                    <div style="text-align: justify !important; margin-bottom: 20px !important; color: #212529 !important;">
+                        <p style="margin: 15px 0 !important; color: #212529 !important;">{formatted_text}</p>
+                    </div>
+                </div>
+                """
+                total_chars += len(text)
+            
+            full_text += f"""
+                </div>
+                <div style="margin-top: 30px !important; padding: 15px !important; background: #e9ecef !important; border-radius: 5px !important; text-align: center !important; color: #6c757d !important;">
+                    📊 <strong style="color: #495057 !important;">{len(chapters)} {i18n.t('chapters')}</strong> | 
+                    📝 <strong style="color: #495057 !important;">{total_chars:,} {i18n.t('characters')}</strong>
+                </div>
+            </div>
+            """
+            
+            return full_text
+        else:
+            return f'<div style="color: #dc3545; padding: 20px; text-align: center; font-size: 1.1rem;">{i18n.t("no_text_loaded")}</div>'
+            
+    except Exception as e:
+        return f'<div style="color: #dc3545; padding: 20px; text-align: center; font-size: 1.1rem;">{i18n.t("error")}: {str(e)}</div>'
 
 def process_ui_form(
     # Source selection
@@ -196,6 +381,8 @@ def process_ui_form(
     # Advanced options
     search_and_replace_file, title_mode, new_line_mode, 
     chapter_start, chapter_end, remove_endnotes, remove_reference_numbers,
+    # API Keys
+    openai_api_key, openai_api_base, azure_api_key, azure_region,
     # TTS provider settings
     model, voices, speed, openai_output_format, instructions,
     azure_language, azure_voice, azure_output_format, azure_break_duration,
@@ -235,9 +422,18 @@ def process_ui_form(
     config.search_and_replace_file = search_and_replace_file.name if hasattr(search_and_replace_file, 'name') else search_and_replace_file
     
     # One file output (your feature!)
-    if hasattr(config, 'one_file_output'):
-        config.one_file_output = one_file_output
+    config.one_file_output = one_file_output
     
+    # Set API keys as environment variables
+    if openai_api_key:
+        os.environ['OPENAI_API_KEY'] = openai_api_key
+    if openai_api_base:
+        os.environ['OPENAI_API_BASE'] = openai_api_base
+    if azure_api_key:
+        os.environ['MS_TTS_KEY'] = azure_api_key
+    if azure_region:
+        os.environ['MS_TTS_REGION'] = azure_region
+
     # TTS provider configuration
     global selected_tts
     if selected_tts == "OpenAI":
@@ -373,6 +569,13 @@ def create_enhanced_ui(config):
                     max_height=200
                 )
             
+            with gr.Row():
+                select_from_results_btn = gr.Button(
+                    i18n.t("select_from_results"), 
+                    variant="primary",
+                    interactive=False
+                )
+            
             search_status = gr.Textbox(label="Status", interactive=False)
         
         # Output settings
@@ -394,7 +597,9 @@ def create_enhanced_ui(config):
         # Preview and cost estimation section
         with gr.Row():
             with gr.Column():
-                preview_btn = gr.Button(i18n.t("show_preview"), variant="secondary")
+                with gr.Row():
+                    preview_btn = gr.Button(i18n.t("show_preview"), variant="secondary", scale=1)
+                    full_preview_btn = gr.Button("📖 " + i18n.t("show_full_text"), variant="primary", scale=1)
                 text_preview = gr.Textbox(
                     label=i18n.t("preview_text"),
                     lines=8,
@@ -405,10 +610,20 @@ def create_enhanced_ui(config):
             
             with gr.Column():
                 cost_btn = gr.Button(i18n.t("cost_estimation"), variant="secondary")
-                cost_display = gr.Markdown(
+                cost_display = gr.HTML(
                     value="",
                     elem_classes=["cost-display"]
                 )
+        
+        # Full text preview section (initially hidden)
+        with gr.Group(visible=False) as full_text_modal:
+            with gr.Row():
+                gr.Markdown("### 📖 " + i18n.t("full_text_preview"))
+                close_modal_btn = gr.Button("❌ Schließen", variant="secondary", size="sm")
+            full_text_display = gr.HTML(
+                value="",
+                elem_classes=["full-text-display"]
+            )
         
         # Processing options
         with gr.Row():
@@ -496,6 +711,21 @@ def create_enhanced_ui(config):
         with gr.Tabs(selected="edge_tab_id"):
             with gr.Tab("OpenAI", id="openai_tab_id") as open_ai_tab:
                 gr.Markdown(i18n.t("openai_key_info"))
+                # API Key section
+                with gr.Row(equal_height=True):
+                    openai_api_key = gr.Textbox(
+                        label="OpenAI API Key", 
+                        type="password", 
+                        interactive=True,
+                        placeholder="sk-...",
+                        info="Geben Sie Ihren OpenAI API-Key ein"
+                    )
+                    openai_api_base = gr.Textbox(
+                        label="API Base URL (optional)", 
+                        interactive=True,
+                        placeholder="https://api.openai.com/v1",
+                        info="Nur ändern wenn Sie einen anderen Endpoint verwenden"
+                    )
                 with gr.Row(equal_height=True):
                     model = gr.Dropdown(get_openai_supported_models(), label=i18n.t("model"), interactive=True, allow_custom_value=True)
                     voices = gr.Dropdown(get_openai_supported_voices(), label=i18n.t("voice"), interactive=True, allow_custom_value=True)
@@ -508,6 +738,21 @@ def create_enhanced_ui(config):
             
             with gr.Tab("Azure", id="azure_tab_id") as azure_tab:
                 gr.Markdown(i18n.t("azure_key_info"))
+                # API Key section
+                with gr.Row(equal_height=True):
+                    azure_api_key = gr.Textbox(
+                        label="Azure TTS API Key", 
+                        type="password", 
+                        interactive=True,
+                        placeholder="Ihr Azure TTS Key",
+                        info="Geben Sie Ihren Azure TTS API-Key ein"
+                    )
+                    azure_region = gr.Textbox(
+                        label="Azure Region", 
+                        interactive=True,
+                        placeholder="westeurope",
+                        info="Azure Region (z.B. westeurope, eastus)"
+                    )
                 with gr.Row(equal_height=True):
                     azure_language = gr.Dropdown(get_azure_supported_languages(), value="en-US", label=i18n.t("language"),
                                                interactive=True)
@@ -563,7 +808,14 @@ def create_enhanced_ui(config):
         
         # Log display
         with gr.Row():
-            log_display = Log(label="Conversion Logs", lines=15)
+            log_display = gr.Textbox(
+                label="Conversion Status",
+                lines=10,
+                max_lines=15,
+                interactive=False,
+                value="Ready to start conversion...",
+                info="Status updates will appear here during conversion"
+            )
         
         # Event handlers
         def update_source_visibility(source):
@@ -585,9 +837,44 @@ def create_enhanced_ui(config):
             outputs=[search_results, search_status]
         )
         
+        # Enable selection button when search results are available
+        def enable_selection_button(results_data, status):
+            try:
+                # Check if results_data has content
+                if results_data is not None:
+                    # For pandas DataFrame
+                    if hasattr(results_data, 'empty'):
+                        if not results_data.empty and len(results_data) > 0:
+                            return gr.update(interactive=True)
+                    # For lists
+                    elif isinstance(results_data, list) and len(results_data) > 0:
+                        return gr.update(interactive=True)
+                return gr.update(interactive=False)
+            except Exception as e:
+                print(f"Error in enable_selection_button: {e}")
+                return gr.update(interactive=False)
+        
+        search_btn.click(
+            enable_selection_button,
+            inputs=[search_results, search_status],
+            outputs=[select_from_results_btn]
+        )
+        
+        # Handle row selection in search results
+        search_results.select(
+            lambda: gr.update(interactive=True),
+            outputs=[select_from_results_btn]
+        )
+        
         load_gutenberg_btn.click(
             load_gutenberg_book,
             inputs=[gutenberg_id],
+            outputs=[input_file, text_preview, search_status]
+        )
+        
+        select_from_results_btn.click(
+            load_selected_book_from_results,
+            inputs=[search_results],
             outputs=[input_file, text_preview, search_status]
         )
         
@@ -596,6 +883,30 @@ def create_enhanced_ui(config):
             show_text_preview,
             inputs=[input_file],
             outputs=[text_preview]
+        )
+        
+        # Full text preview popup functionality
+        def show_full_text_modal(file_path):
+            """Show full text in modal and toggle visibility"""
+            if not file_path:
+                return gr.update(visible=False), ""
+            
+            full_text = show_full_text_preview(file_path)
+            return gr.update(visible=True), full_text
+        
+        def close_full_text_modal():
+            """Close the full text modal"""
+            return gr.update(visible=False), ""
+        
+        full_preview_btn.click(
+            show_full_text_modal,
+            inputs=[input_file],
+            outputs=[full_text_modal, full_text_display]
+        )
+        
+        close_modal_btn.click(
+            close_full_text_modal,
+            outputs=[full_text_modal, full_text_display]
         )
         
         cost_btn.click(
@@ -626,6 +937,7 @@ def create_enhanced_ui(config):
                 worker_count, log_level, output_text, preview,
                 search_and_replace_file, title_mode, new_line_mode,
                 chapter_start, chapter_end, remove_endnotes, remove_reference_numbers,
+                openai_api_key, openai_api_base, azure_api_key, azure_region,
                 model, voices, speed, openai_output_format, instructions,
                 azure_language, azure_voice, azure_output_format, azure_break_duration,
                 edge_language, edge_voice, edge_output_format, proxy,
@@ -643,7 +955,7 @@ def create_enhanced_ui(config):
 def host_enhanced_ui(config):
     """Host the enhanced UI with all features"""
     global webui_log_file
-    webui_log_file = generate_unique_log_path()
+    webui_log_file = None  # Simplified logging
     
     ui = create_enhanced_ui(config)
     

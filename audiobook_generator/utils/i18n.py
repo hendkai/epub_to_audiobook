@@ -29,6 +29,8 @@ class I18n:
                 'gutenberg_project': 'Project Gutenberg',
                 'gutenberg_id_url': 'Gutenberg ID oder URL',
                 'load_from_gutenberg': 'Von Gutenberg laden',
+        'select_from_results': 'Ausgewähltes Buch laden',
+        'no_book_selected': 'Kein Buch ausgewählt. Suchen Sie zuerst nach Büchern und klicken Sie dann auf "Ausgewähltes Buch laden".',
                 'search_gutenberg': 'Project Gutenberg durchsuchen',
                 
                 # TTS Settings
@@ -82,9 +84,17 @@ class I18n:
                 'catalog_error': 'Fehler beim Laden des Katalogs',
                 'gutenberg_success': 'Text von Project Gutenberg erfolgreich geladen',
                 'gutenberg_error': 'Fehler beim Laden von Project Gutenberg',
-                'preview_text': 'Text-Vorschau',
-                'show_preview': 'Vorschau anzeigen',
-                'hide_preview': 'Vorschau verstecken',
+                'preview_text': 'Text Preview',
+                'show_preview': 'Show Preview',
+                'hide_preview': 'Hide Preview',
+                'show_full_text': 'Show Full Text',
+                'full_text_preview': 'Full Text Preview',
+                'chapters': 'Chapters',
+                'no_text_loaded': 'No text loaded',
+                'show_full_text': 'Volltext anzeigen',
+                'full_text_preview': 'Volltext-Vorschau',
+                'chapters': 'Kapitel',
+                'no_text_loaded': 'Kein Text geladen',
                 
                 # Cost estimation
                 'cost_estimation': 'Kostenschätzung',
@@ -166,6 +176,8 @@ class I18n:
                 'gutenberg_project': 'Project Gutenberg',
                 'gutenberg_id_url': 'Gutenberg ID or URL',
                 'load_from_gutenberg': 'Load from Gutenberg',
+        'select_from_results': 'Load Selected Book',
+        'no_book_selected': 'No book selected. Search for books first, then click "Load Selected Book".',
                 'search_gutenberg': 'Search Project Gutenberg',
                 
                 # TTS Settings
@@ -222,6 +234,10 @@ class I18n:
                 'preview_text': 'Text Preview',
                 'show_preview': 'Show Preview',
                 'hide_preview': 'Hide Preview',
+                'show_full_text': 'Show Full Text',
+                'full_text_preview': 'Full Text Preview',
+                'chapters': 'Chapters',
+                'no_text_loaded': 'No text loaded',
                 
                 # Cost estimation
                 'cost_estimation': 'Cost Estimation',

@@ -13,7 +13,7 @@ class CostCalculator:
             'tts-1-hd': 0.030,  # $0.030 per 1K characters
         },
         'azure': {
-            'standard': 0.004,   # $4 per 1M characters = $0.004 per 1K
+            'standard': 0.016,   # $16 per 1M characters = $0.016 per 1K
             'neural': 0.016,     # $16 per 1M characters = $0.016 per 1K
         },
         'edge': {
@@ -68,8 +68,8 @@ class CostCalculator:
                 'text_length': text_length,
                 'chars_in_thousands': chars_in_thousands,
                 'rate_per_1k_chars': rate,
-                'estimated_cost_usd': round(estimated_cost, 4),
-                'estimated_cost_eur': round(estimated_cost * 0.85, 4),  # Rough EUR conversion
+                'estimated_cost_usd': round(estimated_cost, 2),
+                'estimated_cost_eur': round(estimated_cost * 0.85, 2),  # Rough EUR conversion
                 'is_free': rate == 0.0
             }
             
@@ -111,8 +111,16 @@ class CostCalculator:
         cost_eur = cost_info.get('estimated_cost_eur', 0)
         chars = cost_info.get('text_length', 0)
         
-        return (f"💰 {cost_info['provider'].title()} ({cost_info['model']}): "
-                f"~${cost_usd:.4f} USD / ~€{cost_eur:.4f} EUR "
+        # Add cost context for better understanding
+        if cost_usd > 0.5:
+            cost_indicator = "💸"  # Expensive
+        elif cost_usd > 0.1:
+            cost_indicator = "💰"  # Moderate
+        else:
+            cost_indicator = "💵"  # Cheap
+        
+        return (f"{cost_indicator} {cost_info['provider'].title()} ({cost_info['model']}): "
+                f"~${cost_usd:.2f} USD / ~€{cost_eur:.2f} EUR "
                 f"({chars:,} Zeichen)")
     
     def get_cheapest_option(self, text_length: int) -> Tuple[str, Dict]:
